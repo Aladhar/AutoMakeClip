@@ -1,0 +1,110 @@
+# AutoMakeClip
+
+AutoMakeClip turns a long Overwatch gameplay recording into a tighter highlight reel:
+
+- finds kill-heavy and fight-heavy moments from one or more source MP4s
+- boosts kill-feed and action-heavy sections
+- prefers embedded SteelSeries / GameSense kill events when they exist
+- inserts a short stylized intro
+- prefers real licensed music from a local library manifest, then open-use tracks
+- aligns clip lengths toward the chosen track's beat grid
+- exports a higher-fidelity final montage MP4 plus a credits file for the music
+
+The goal is the vibe you described: compact gameplay cuts, a quick intro, some silly chaos, and the strongest slay moments.
+
+## How It Works
+
+The current version is Overwatch-aware and uses a hybrid selection flow:
+
+- embedded SteelSeries / GameSense kill timestamps when present
+- visual motion from low-FPS analysis frames
+- top-right HUD change detection to approximate kill-feed activity
+- bottom-center HUD change detection to catch active ability/fight states
+- center-screen gameplay confidence gating to suppress loading / dead / spectate junk
+- audio RMS and spectral flux to rank hype around real fight windows
+
+It does not need manual timestamps.
+
+## Requirements
+
+- Python 3.9+
+- `ffmpeg`
+- `ffprobe`
+
+On macOS:
+
+```bash
+brew install ffmpeg
+python3 -m pip install -e .
+```
+
+## Usage
+
+```bash
+automakeclip \
+  --input /path/to/overwatch_take_01.mp4 /path/to/overwatch_take_02.mp4 \
+  --output /path/to/overwatch_highlight.mp4 \
+  --title "Overwatch Highlight Reel" \
+  --subtitle "slay, chaos, and one stupidly funny fight"
+```
+
+Useful options:
+
+```bash
+automakeclip --help
+automakeclip --input take.mp4 --output reel.mp4 --target-seconds 38
+automakeclip --input take1.mp4 take2.mp4 take3.mp4 --output reel.mp4
+automakeclip --input "/path/to/Videos" --output reel.mp4
+automakeclip --input take.mp4 --output reel.mp4 --no-silly
+automakeclip --input take.mp4 --output reel.mp4 --no-music
+automakeclip --input "/path/to/Videos" --output reel.mp4 --no-cache
+automakeclip --input take.mp4 --output reel.mp4 --keep-temp
+automakeclip --input take.mp4 --output reel.mp4 --dry-run
+```
+
+## Output
+
+For a command like:
+
+```bash
+automakeclip --input take1.mp4 take2.mp4 --output output/reel.mp4
+```
+
+you will get:
+
+- `output/reel.mp4`
+- `output/reel.plan.json`
+- `output/reel.credits.txt`
+
+The plan JSON is useful for tuning the cut logic if you want to iterate on the montage style.
+
+When you provide multiple inputs, the tool scores each recording separately, pools the best moments, and builds one final montage across all of them.
+
+The tool also keeps a per-video analysis cache in `.automakeclip_cache/` so repeated runs over the same folder do not need to re-scan every MP4 unless the file or analysis settings changed.
+
+## Music Source
+
+The music picker now works in this order:
+
+- local library manifest in `music_library/tracks.json` for real songs you already downloaded or licensed
+- public ccMixter catalog as an open-use fallback
+- generated fallback only if no real track can be used
+
+The local-library route is the safest way to use actual songs in a repeatable workflow. A starter schema lives at `music_library/tracks.example.json`.
+
+The picker aims for:
+
+- aggressive electronic / hip-hop for high-intensity slay-heavy reels
+- bouncier groove-oriented tracks when the reel has more chaos/comedy energy
+- mid-tempo energetic tracks for balanced highlight reels
+
+The exact track is chosen automatically from the reel's detected pace.
+
+For YouTube-safe publishing, prefer tracks you downloaded from YouTube Audio Library or music you separately licensed through YouTube Creator Music and list them in the manifest with their local file paths.
+
+## Notes
+
+- Default export quality is now geared toward 1440p source footage.
+- This repo is still intentionally easy to tweak in code if you want to push the style further.
+- `ffmpeg` is required at runtime even after Python dependencies are installed.
+- If your footage uses a different HUD layout or resolution, adjust the Overwatch ROI values in `src/automakeclip/config.py`.
