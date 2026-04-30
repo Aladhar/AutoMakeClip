@@ -72,30 +72,49 @@ def pick_segments(timeline: AnalysisTimeline, metadata: VideoMetadata, config: A
 
 def extract_candidate_segments(timeline: AnalysisTimeline, metadata: VideoMetadata, config: AnalysisConfig) -> List[Segment]:
     event_candidates = _extract_event_segments(timeline, metadata, config)
-    generic_peak_candidates = _extract_generic_peak_segments(timeline, metadata, config)
     heuristic_candidates = _extract_heuristic_segments(timeline, metadata, config)
 
-    candidates = list(event_candidates)
-    candidates = _extend_diverse_candidates(
-        candidates,
-        generic_peak_candidates,
-        quota=config.generic_peak_quota if event_candidates else max(config.generic_peak_quota, 4),
-    )
-    candidates = _extend_diverse_candidates(
-        candidates,
-        [
+    if event_candidates:
+        candidates = list(event_candidates)
+        fallback_added = 0
+        for candidate in sorted(heuristic_candidates, key=lambda item: item.score, reverse=True):
+            if fallback_added >= config.fallback_fight_quota:
+                break
+            if any(_overlap(candidate, event_candidate) > 0.45 for event_candidate in event_candidates):
+                continue
+            candidates.append(
+                Segment(
+                    start=candidate.start,
+                    end=candidate.end,
+                    score=candidate.score * 0.88,
+                    label="fight",
+                    note="High-action fallback window without a logged kill event.",
+                    highlight_time=candidate.highlight_time,
+                )
+            )
+            fallback_added += 1
+        return candidates
+
+    generic_peak_candidates = _extract_generic_peak_segments(timeline, metadata, config)
+    candidates = list(generic_peak_candidates)
+    fallback_quota = max(config.fallback_fight_quota, 2 if generic_peak_candidates else 3)
+    fallback_added = 0
+    for candidate in sorted(heuristic_candidates, key=lambda item: item.score, reverse=True):
+        if fallback_added >= fallback_quota:
+            break
+        if any(_overlap(candidate, existing) > 0.45 for existing in candidates):
+            continue
+        candidates.append(
             Segment(
                 start=candidate.start,
                 end=candidate.end,
-                score=candidate.score * 0.88,
-                label="fight",
-                note="High-action fallback window without a logged kill event.",
+                score=candidate.score * 0.90,
+                label=candidate.label,
+                note="Fallback active team-fight window without logged kill events.",
                 highlight_time=candidate.highlight_time,
             )
-            for candidate in heuristic_candidates
-        ],
-        quota=config.fallback_fight_quota if (event_candidates or generic_peak_candidates) else max(config.fallback_fight_quota, 3),
-    )
+        )
+        fallback_added += 1
     return candidates or heuristic_candidates
 
 
@@ -445,21 +464,6 @@ def _near_kill_event(time_seconds: float, kill_events: List[dict], window: float
         if abs(timestamp - time_seconds) <= window:
             return True
     return False
-
-
-def _extend_diverse_candidates(existing: List[Segment], additions: List[Segment], quota: int) -> List[Segment]:
-    if quota <= 0:
-        return existing
-    merged = list(existing)
-    accepted = 0
-    for candidate in sorted(additions, key=lambda item: item.score, reverse=True):
-        if accepted >= quota:
-            break
-        if any(_overlap(candidate, current) > 0.45 for current in merged):
-            continue
-        merged.append(candidate)
-        accepted += 1
-    return merged
 
 
 def _fit_to_length(values: np.ndarray, target_length: int) -> np.ndarray:

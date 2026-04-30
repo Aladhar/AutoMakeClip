@@ -42,6 +42,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertGreaterEqual(best.end, 14.5)
         self.assertIn("SteelSeries", best.note)
         self.assertAlmostEqual(best.highlight_time or 0.0, 14.5)
+        self.assertFalse(any("Generic" in candidate.note for candidate in candidates))
 
     def test_generates_generic_peak_candidates_without_metadata(self) -> None:
         timeline = AnalysisTimeline(

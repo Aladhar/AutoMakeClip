@@ -26,6 +26,7 @@ class ReviewClip:
     label: str
     note: str
     filename: str
+    uncertainty: float = 0.0
 
 
 @dataclass
@@ -110,6 +111,7 @@ def main() -> int:
         clips_dir.mkdir(parents=True, exist_ok=True)
         preview_render = RenderConfig(width=1280, height=720, fps=30, crf=22, preset="veryfast")
         review_clips: List[ReviewClip] = []
+        uncertainty_by_key = _uncertainty_scores(samples)
         for index, segment in enumerate(samples, start=1):
             clip_id = f"clip-{index:03d}"
             filename = f"{clip_id}.mp4"
@@ -125,6 +127,7 @@ def main() -> int:
                     label=segment.label,
                     note=segment.note,
                     filename=filename,
+                    uncertainty=uncertainty_by_key.get(_segment_key(segment), 0.0),
                 )
             )
 
@@ -153,39 +156,37 @@ def select_review_samples(candidates: List[Segment], sample_count: int) -> List[
     if sample_count <= 0 or not candidates:
         return []
 
-    ordered = sorted(candidates, key=lambda item: item.score, reverse=True)
-    third = max(1, len(ordered) // 3)
-    buckets = [
-        ordered[:third],
-        ordered[third : third * 2],
-        ordered[third * 2 :],
-    ]
-    quotas = [
-        max(1, sample_count // 2),
-        max(1, int(round(sample_count * 0.33))),
-        max(1, sample_count - (max(1, sample_count // 2) + max(1, int(round(sample_count * 0.33))))),
-    ]
+    uncertainty_map = _uncertainty_scores(candidates)
+    ordered = sorted(
+        candidates,
+        key=lambda item: (uncertainty_map.get(_segment_key(item), 0.0), item.score),
+        reverse=True,
+    )
 
     selected: List[Segment] = []
-    for bucket, quota in zip(buckets, quotas):
-        if not bucket:
+    label_quotas = {
+        "fight": max(1, sample_count // 3),
+        "slay": max(1, sample_count // 4),
+        "silly": 1,
+    }
+    label_counts = {"fight": 0, "slay": 0, "silly": 0}
+
+    for candidate in ordered:
+        if len(selected) >= sample_count:
+            break
+        if any(_same_source_overlap(candidate, existing) > 0.55 for existing in selected):
             continue
-        stride = max(1, len(bucket) // max(quota, 1))
-        for candidate in bucket[::stride]:
-            if len(selected) >= sample_count:
-                break
-            if any(_same_source_overlap(candidate, existing) > 0.55 for existing in selected):
-                continue
+        if label_counts.get(candidate.label, 0) < label_quotas.get(candidate.label, 0):
             selected.append(candidate)
-            if sum(1 for item in selected if item in bucket) >= quota:
-                break
-    if len(selected) < sample_count:
-        for candidate in ordered:
-            if len(selected) >= sample_count:
-                break
-            if any(_same_source_overlap(candidate, existing) > 0.55 for existing in selected):
-                continue
-            selected.append(candidate)
+            label_counts[candidate.label] = label_counts.get(candidate.label, 0) + 1
+
+    for candidate in ordered:
+        if len(selected) >= sample_count:
+            break
+        if any(_same_source_overlap(candidate, existing) > 0.55 for existing in selected):
+            continue
+        selected.append(candidate)
+
     return selected[:sample_count]
 
 
@@ -233,22 +234,50 @@ def _session_dir(raw_value: str) -> Path:
 def _ensure_labels_file(labels_path: Path) -> None:
     labels_path.parent.mkdir(parents=True, exist_ok=True)
     if not labels_path.exists():
-        labels_path.write_text(json.dumps({"decisions": {}}, indent=2), encoding="utf-8")
+        labels_path.write_text(
+            json.dumps({"decisions": {}, "clip_feedback": {}, "session_feedback": ""}, indent=2),
+            encoding="utf-8",
+        )
 
 
-def _load_labels(labels_path: Path) -> Dict[str, Dict[str, str]]:
+def _load_labels(labels_path: Path) -> Dict[str, object]:
     try:
         payload = json.loads(labels_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        payload = {"decisions": {}}
+        payload = {"decisions": {}, "clip_feedback": {}, "session_feedback": ""}
     decisions = payload.get("decisions")
+    clip_feedback = payload.get("clip_feedback")
+    session_feedback = payload.get("session_feedback")
     if not isinstance(decisions, dict):
         decisions = {}
-    return {"decisions": decisions}
+    if not isinstance(clip_feedback, dict):
+        clip_feedback = {}
+    if not isinstance(session_feedback, str):
+        session_feedback = ""
+    return {
+        "decisions": decisions,
+        "clip_feedback": clip_feedback,
+        "session_feedback": session_feedback,
+    }
 
 
-def _store_labels(labels_path: Path, decisions: Dict[str, str]) -> None:
-    labels_path.write_text(json.dumps({"decisions": decisions}, indent=2), encoding="utf-8")
+def _store_labels(
+    labels_path: Path,
+    decisions: Dict[str, str],
+    clip_feedback: Dict[str, str],
+    session_feedback: str,
+) -> None:
+    labels_path.write_text(
+        json.dumps(
+            {
+                "decisions": decisions,
+                "clip_feedback": clip_feedback,
+                "session_feedback": session_feedback,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
 
 def _build_handler(state: ReviewState):
@@ -259,7 +288,9 @@ def _build_handler(state: ReviewState):
                 self._send_html(_review_html())
                 return
             if parsed.path == "/api/session":
-                labels = _load_labels(state.labels_path)["decisions"]
+                labels_payload = _load_labels(state.labels_path)
+                labels = labels_payload["decisions"]
+                clip_feedback = labels_payload["clip_feedback"]
                 payload = {
                     "session_dir": str(state.session_dir),
                     "clips": [
@@ -267,10 +298,13 @@ def _build_handler(state: ReviewState):
                             **asdict(clip),
                             "video_url": f"/clips/{clip.filename}",
                             "decision": labels.get(clip.clip_id, ""),
+                            "feedback": clip_feedback.get(clip.clip_id, ""),
                         }
                         for clip in state.clips
                     ],
                     "decisions": labels,
+                    "clip_feedback": clip_feedback,
+                    "session_feedback": labels_payload["session_feedback"],
                 }
                 self._send_json(payload)
                 return
@@ -291,9 +325,6 @@ def _build_handler(state: ReviewState):
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
-            if parsed.path != "/api/label":
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
             try:
                 content_length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
@@ -305,19 +336,45 @@ def _build_handler(state: ReviewState):
                 self.send_error(HTTPStatus.BAD_REQUEST)
                 return
 
-            clip_id = str(payload.get("clip_id") or "")
-            decision = str(payload.get("decision") or "")
-            if clip_id not in {clip.clip_id for clip in state.clips}:
-                self.send_error(HTTPStatus.BAD_REQUEST, "Unknown clip_id")
-                return
-            if decision not in {"yes", "no", "skip"}:
-                self.send_error(HTTPStatus.BAD_REQUEST, "decision must be yes, no, or skip")
+            labels_payload = _load_labels(state.labels_path)
+            decisions = labels_payload["decisions"]
+            clip_feedback = labels_payload["clip_feedback"]
+            session_feedback = str(labels_payload["session_feedback"])
+
+            if parsed.path == "/api/label":
+                clip_id = str(payload.get("clip_id") or "")
+                decision = str(payload.get("decision") or "")
+                if clip_id not in {clip.clip_id for clip in state.clips}:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "Unknown clip_id")
+                    return
+                if decision not in {"yes", "no", "skip"}:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "decision must be yes, no, or skip")
+                    return
+
+                decisions[clip_id] = decision
+                _store_labels(state.labels_path, decisions, clip_feedback, session_feedback)
+                self._send_json({"ok": True, "clip_id": clip_id, "decision": decision})
                 return
 
-            labels = _load_labels(state.labels_path)["decisions"]
-            labels[clip_id] = decision
-            _store_labels(state.labels_path, labels)
-            self._send_json({"ok": True, "clip_id": clip_id, "decision": decision})
+            if parsed.path == "/api/clip-feedback":
+                clip_id = str(payload.get("clip_id") or "")
+                feedback = str(payload.get("feedback") or "").strip()
+                if clip_id not in {clip.clip_id for clip in state.clips}:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "Unknown clip_id")
+                    return
+                clip_feedback[clip_id] = feedback
+                _store_labels(state.labels_path, decisions, clip_feedback, session_feedback)
+                self._send_json({"ok": True, "clip_id": clip_id, "feedback": feedback})
+                return
+
+            if parsed.path == "/api/session-feedback":
+                session_feedback = str(payload.get("feedback") or "").strip()
+                _store_labels(state.labels_path, decisions, clip_feedback, session_feedback)
+                self._send_json({"ok": True, "session_feedback": session_feedback})
+                return
+
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
 
         def log_message(self, format: str, *args) -> None:
             return
@@ -410,6 +467,11 @@ def _review_html() -> str:
       line-height: 1.5;
       margin-top: 12px;
     }
+    .stack {
+      display: grid;
+      gap: 12px;
+      margin-top: 16px;
+    }
     .pill {
       display: inline-block;
       padding: 4px 10px;
@@ -417,6 +479,21 @@ def _review_html() -> str:
       background: rgba(255,255,255,0.09);
       margin-right: 8px;
       margin-bottom: 8px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 88px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(8, 12, 18, 0.95);
+      color: var(--text);
+      padding: 12px;
+      resize: vertical;
+      box-sizing: border-box;
+    }
+    .small {
+      font-size: 13px;
+      color: var(--muted);
     }
   </style>
 </head>
@@ -441,6 +518,28 @@ def _review_html() -> str:
         <div id="pills"></div>
         <div id="source"></div>
         <div id="note"></div>
+      </div>
+      <div class="stack">
+        <div>
+          <div class="small">Clip feedback</div>
+          <textarea id="clipFeedback" placeholder="Why is this good or bad? For example: real kill, boring, loading screen, funny missplay, great ult combo..."></textarea>
+          <div class="row">
+            <div class="small" id="clipFeedbackStatus">No clip feedback saved yet.</div>
+            <div class="buttons">
+              <button class="skip" onclick="saveClipFeedback()">Save Clip Feedback</button>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="small">Session feedback</div>
+          <textarea id="sessionFeedback" placeholder="General notes about what you want more or less of in the filter."></textarea>
+          <div class="row">
+            <div class="small" id="sessionFeedbackStatus">No session feedback saved yet.</div>
+            <div class="buttons">
+              <button class="skip" onclick="saveSessionFeedback()">Save Session Feedback</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </main>
@@ -474,10 +573,16 @@ def _review_html() -> str:
         player.play().catch(() => {});
       }
       document.getElementById('pills').innerHTML =
-        `<span class="pill">${clip.label}</span><span class="pill">score ${clip.score.toFixed(2)}</span><span class="pill">decision ${clip.decision || 'pending'}</span>`;
+        `<span class="pill">${clip.label}</span><span class="pill">score ${clip.score.toFixed(2)}</span><span class="pill">uncertainty ${clip.uncertainty.toFixed(2)}</span><span class="pill">decision ${clip.decision || 'pending'}</span>`;
       document.getElementById('source').textContent =
         `${clip.source_path} | ${clip.start.toFixed(2)}s - ${clip.end.toFixed(2)}s`;
       document.getElementById('note').textContent = clip.note || '';
+      document.getElementById('clipFeedback').value = clip.feedback || '';
+      document.getElementById('clipFeedbackStatus').textContent =
+        clip.feedback ? 'Clip feedback saved.' : 'No clip feedback saved yet.';
+      document.getElementById('sessionFeedback').value = session.session_feedback || '';
+      document.getElementById('sessionFeedbackStatus').textContent =
+        session.session_feedback ? 'Session feedback saved.' : 'No session feedback saved yet.';
     }
 
     async function label(decision) {
@@ -492,6 +597,29 @@ def _review_html() -> str:
         index += 1;
         render();
       }
+    }
+
+    async function saveClipFeedback() {
+      const clip = session.clips[index];
+      const feedback = document.getElementById('clipFeedback').value;
+      await fetch('/api/clip-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clip_id: clip.clip_id, feedback })
+      });
+      await loadSession();
+      document.getElementById('clipFeedbackStatus').textContent = 'Clip feedback saved.';
+    }
+
+    async function saveSessionFeedback() {
+      const feedback = document.getElementById('sessionFeedback').value;
+      await fetch('/api/session-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback })
+      });
+      await loadSession();
+      document.getElementById('sessionFeedbackStatus').textContent = 'Session feedback saved.';
     }
 
     function move(delta) {
@@ -520,6 +648,30 @@ def _same_source_overlap(first: Segment, second: Segment) -> float:
     if intersection <= 0.0:
         return 0.0
     return intersection / max(min(first.duration, second.duration), 1e-6)
+
+
+def _uncertainty_scores(candidates: List[Segment]) -> Dict[str, float]:
+    if not candidates:
+        return {}
+    scores = [candidate.score for candidate in candidates]
+    score_min = min(scores)
+    score_max = max(scores)
+    midpoint = (score_min + score_max) / 2.0
+    spread = max(score_max - score_min, 1e-6)
+
+    uncertainty: Dict[str, float] = {}
+    for candidate in candidates:
+        centered = 1.0 - min(abs(candidate.score - midpoint) / (spread / 2.0), 1.0)
+        generic_bonus = 0.35 if "Generic" in candidate.note else 0.0
+        fight_bonus = 0.22 if candidate.label == "fight" else 0.0
+        silly_bonus = 0.08 if candidate.label == "silly" else 0.0
+        edge_penalty = 0.18 if candidate.start <= 0.3 else 0.0
+        uncertainty[_segment_key(candidate)] = centered + generic_bonus + fight_bonus + silly_bonus - edge_penalty
+    return uncertainty
+
+
+def _segment_key(segment: Segment) -> str:
+    return f"{segment.source_path}|{segment.start:.3f}|{segment.end:.3f}|{segment.label}"
 
 
 if __name__ == "__main__":
