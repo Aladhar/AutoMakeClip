@@ -62,6 +62,33 @@ automakeclip --input take.mp4 --output reel.mp4 --keep-temp
 automakeclip --input take.mp4 --output reel.mp4 --dry-run
 ```
 
+You can also pass YouTube URLs when `yt-dlp` is installed. If you pass a YouTube channel `/streams` page, the resolver looks for recent titles that mention `Overwatch` or `OW2`, downloads those VODs locally, and then analyzes the resulting MP4s.
+
+## Review UI
+
+To calibrate what counts as a good clip, generate sample clips and review them in a tiny yes/no UI:
+
+```bash
+automakeclip-review \
+  --input "/path/to/Videos" \
+  --samples 18
+```
+
+If the new console script is not installed yet in your environment, run the repo-local launcher instead:
+
+```bash
+python3 review_ui.py --input "/path/to/Videos" --samples 18
+```
+
+This creates a review session in `review_sessions/` and starts a local UI at `http://127.0.0.1:8765`.
+
+The review app:
+
+- renders short sample clips from the current detector
+- lets you mark each one `yes`, `no`, or `skip`
+- saves your decisions to `labels.json` in the session folder
+- works with local MP4s, folders, or YouTube URLs when `yt-dlp` is available
+
 ## Output
 
 For a command like:

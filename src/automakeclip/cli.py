@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List
 
 from .config import AppConfig
+from .inputs import InputResolutionError, resolve_inputs
 from .types import Segment
 from .types import MontagePlan
 
@@ -48,7 +49,7 @@ def main() -> int:
         )
         return 2
 
-    input_paths = _resolve_input_paths(args.input)
+    input_paths = resolve_inputs(args.input, download_root=Path.cwd() / ".automakeclip_downloads")
     output_path = Path(args.output).expanduser().resolve()
     missing_paths = [path for path in input_paths if not path.exists()]
     if missing_paths:
@@ -157,26 +158,9 @@ def main() -> int:
         render_montage(plan=plan, analysis_config=config.analysis, render_config=config.render, keep_temp=args.keep_temp)
         print(f"Created highlight reel: {output_path}")
         return 0
-    except (FFmpegError, MusicSelectionError, RuntimeError) as error:
+    except (FFmpegError, MusicSelectionError, InputResolutionError, RuntimeError) as error:
         print(str(error), file=sys.stderr)
         return 1
-
-def _resolve_input_paths(raw_inputs: List[List[str]]) -> List[Path]:
-    resolved: List[Path] = []
-    seen = set()
-    for group in raw_inputs:
-        for value in group:
-            path = Path(value).expanduser().resolve()
-            if path.is_dir():
-                for child in sorted(path.iterdir()):
-                    if child.is_file() and child.suffix.lower() == ".mp4" and child not in seen:
-                        resolved.append(child)
-                        seen.add(child)
-                continue
-            if path not in seen:
-                resolved.append(path)
-                seen.add(path)
-    return resolved
 
 
 def _select_global_segments(candidates: List[Segment], target_seconds: float, intro_seconds: float) -> List[Segment]:

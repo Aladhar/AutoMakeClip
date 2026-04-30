@@ -42,6 +42,27 @@ class AnalysisTests(unittest.TestCase):
         self.assertGreaterEqual(best.end, 14.5)
         self.assertIn("SteelSeries", best.note)
 
+    def test_generates_generic_peak_candidates_without_metadata(self) -> None:
+        timeline = AnalysisTimeline(
+            times=[0.0, 4.0, 8.0, 12.0, 16.0, 20.0, 24.0, 28.0],
+            visual_motion=[0.1, 0.2, 0.3, 0.9, 1.0, 0.8, 0.2, 0.1],
+            killfeed_motion=[0.0, 0.1, 0.2, 0.9, 1.1, 0.85, 0.1, 0.0],
+            hud_motion=[0.05, 0.1, 0.15, 0.7, 0.9, 0.7, 0.1, 0.05],
+            center_motion=[0.05, 0.1, 0.2, 0.8, 0.95, 0.75, 0.1, 0.05],
+            audio_rms=[0.02, 0.05, 0.08, 0.35, 0.5, 0.38, 0.05, 0.02],
+            audio_flux=[0.01, 0.03, 0.05, 0.4, 0.6, 0.45, 0.04, 0.01],
+            scene_change=[0.01, 0.02, 0.04, 0.3, 0.42, 0.31, 0.03, 0.01],
+            gameplay_confidence=[-0.3, -0.1, 0.1, 0.7, 0.95, 0.8, 0.1, -0.2],
+            scores=[-0.2, -0.1, 0.0, 0.8, 1.0, 0.82, 0.0, -0.1],
+            duration=32.0,
+        )
+        metadata = VideoMetadata(duration=32.0, width=1920, height=1080, fps=60.0)
+
+        candidates = extract_candidate_segments(timeline, metadata, AnalysisConfig())
+
+        self.assertTrue(candidates)
+        self.assertTrue(any("Generic" in candidate.note for candidate in candidates))
+
 
 if __name__ == "__main__":
     unittest.main()

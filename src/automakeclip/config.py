@@ -18,6 +18,9 @@ class AnalysisConfig:
     event_pre_roll_seconds: float = 2.0
     event_post_roll_seconds: float = 2.8
     event_merge_gap_seconds: float = 4.25
+    generic_peak_threshold_percentile: float = 84.0
+    generic_peak_min_spacing_seconds: float = 3.2
+    generic_peak_quota: int = 3
     fallback_fight_quota: int = 1
     killfeed_roi: Tuple[float, float, float, float] = (0.72, 0.03, 0.27, 0.25)
     hud_roi: Tuple[float, float, float, float] = (0.28, 0.70, 0.44, 0.26)

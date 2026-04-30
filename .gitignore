@@ -8,4 +8,6 @@ dist/
 output/
 latest-output/
 .automakeclip_cache/
+.automakeclip_downloads/
+review_sessions/
 tmp/

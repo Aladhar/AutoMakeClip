@@ -72,19 +72,18 @@ def pick_segments(timeline: AnalysisTimeline, metadata: VideoMetadata, config: A
 
 def extract_candidate_segments(timeline: AnalysisTimeline, metadata: VideoMetadata, config: AnalysisConfig) -> List[Segment]:
     event_candidates = _extract_event_segments(timeline, metadata, config)
+    generic_peak_candidates = _extract_generic_peak_segments(timeline, metadata, config)
     heuristic_candidates = _extract_heuristic_segments(timeline, metadata, config)
 
-    if not event_candidates:
-        return heuristic_candidates
-
     candidates = list(event_candidates)
-    fallback_added = 0
-    for candidate in sorted(heuristic_candidates, key=lambda item: item.score, reverse=True):
-        if fallback_added >= config.fallback_fight_quota:
-            break
-        if any(_overlap(candidate, event_candidate) > 0.45 for event_candidate in event_candidates):
-            continue
-        candidates.append(
+    candidates = _extend_diverse_candidates(
+        candidates,
+        generic_peak_candidates,
+        quota=config.generic_peak_quota if event_candidates else max(config.generic_peak_quota, 4),
+    )
+    candidates = _extend_diverse_candidates(
+        candidates,
+        [
             Segment(
                 start=candidate.start,
                 end=candidate.end,
@@ -92,10 +91,11 @@ def extract_candidate_segments(timeline: AnalysisTimeline, metadata: VideoMetada
                 label="fight",
                 note="High-action fallback window without a logged kill event.",
             )
-        )
-        fallback_added += 1
-
-    return candidates
+            for candidate in heuristic_candidates
+        ],
+        quota=config.fallback_fight_quota if (event_candidates or generic_peak_candidates) else max(config.fallback_fight_quota, 3),
+    )
+    return candidates or heuristic_candidates
 
 
 def _extract_heuristic_segments(timeline: AnalysisTimeline, metadata: VideoMetadata, config: AnalysisConfig) -> List[Segment]:
@@ -229,23 +229,24 @@ def _pick_silly_segment(timeline: AnalysisTimeline, metadata: VideoMetadata, con
     if candidate_indices.size == 0:
         return None
 
-    best_index = candidate_indices[int(np.argmax(novelty[candidate_indices]))]
-    midpoint = float(times[best_index])
-    if _near_kill_event(midpoint, metadata.kill_events, window=4.0):
-        return None
     duration = float(np.mean(config.comedy_segment_seconds))
-    segment = Segment(
-        start=max(0.0, midpoint - duration * 0.55),
-        end=min(timeline.duration, midpoint + duration * 0.45),
-        score=float(scores[best_index]),
-        label="silly",
-        note="Short chaos/comedy breath between bigger plays.",
-    )
-    if any(_overlap(segment, item) > 0.45 for item in selected):
-        return None
-    if segment.duration < config.comedy_segment_seconds[0]:
-        return None
-    return segment
+    for best_index in candidate_indices[np.argsort(novelty[candidate_indices])[::-1]]:
+        midpoint = float(times[int(best_index)])
+        if _near_kill_event(midpoint, metadata.kill_events, window=4.0):
+            continue
+        segment = Segment(
+            start=max(0.0, midpoint - duration * 0.55),
+            end=min(timeline.duration, midpoint + duration * 0.45),
+            score=float(scores[int(best_index)]),
+            label="silly",
+            note="Short chaos/comedy breath between bigger plays.",
+        )
+        if any(_overlap(segment, item) > 0.45 for item in selected):
+            continue
+        if segment.duration < config.comedy_segment_seconds[0]:
+            continue
+        return segment
+    return None
 
 
 def infer_montage_profile(segments: List[Segment]) -> Tuple[str, float]:
@@ -253,13 +254,15 @@ def infer_montage_profile(segments: List[Segment]) -> Tuple[str, float]:
         return "balanced", 120.0
 
     avg_duration = float(np.mean([segment.duration for segment in segments]))
-    avg_score = float(np.mean([segment.score for segment in segments]))
+    slay_share = sum(1 for segment in segments if segment.label == "slay") / float(len(segments))
     silly_present = any(segment.label == "silly" for segment in segments)
 
-    if avg_score > 0.95 and avg_duration < 4.4:
+    if slay_share >= 0.72 and avg_duration < 4.9:
         return "aggro", 152.0 if silly_present else 160.0
     if silly_present:
         return "chaotic", 126.0
+    if slay_share >= 0.50:
+        return "aggro", 148.0
     return "balanced", 138.0
 
 
@@ -339,6 +342,68 @@ def _extract_event_segments(timeline: AnalysisTimeline, metadata: VideoMetadata,
     return segments
 
 
+def _extract_generic_peak_segments(timeline: AnalysisTimeline, metadata: VideoMetadata, config: AnalysisConfig) -> List[Segment]:
+    times = np.array(timeline.times, dtype=np.float32)
+    scores = np.array(timeline.scores, dtype=np.float32)
+    gameplay = np.array(timeline.gameplay_confidence, dtype=np.float32)
+    killfeed = np.array(timeline.killfeed_motion, dtype=np.float32)
+    center = np.array(timeline.center_motion, dtype=np.float32)
+    hud = np.array(timeline.hud_motion, dtype=np.float32)
+    audio_flux = np.array(timeline.audio_flux, dtype=np.float32)
+    scenes = np.array(timeline.scene_change, dtype=np.float32)
+
+    positive_killfeed = np.clip(_robust_normalize(killfeed), 0.0, None)
+    positive_audio = np.clip(_robust_normalize(audio_flux), 0.0, None)
+    positive_center = np.clip(_robust_normalize(center), 0.0, None)
+    positive_hud = np.clip(_robust_normalize(hud), 0.0, None)
+    positive_scene = np.clip(_robust_normalize(scenes), 0.0, None)
+    positive_scores = np.clip(_robust_normalize(scores), 0.0, None)
+
+    generic_signal = (
+        0.33 * positive_killfeed
+        + 0.21 * positive_audio
+        + 0.16 * positive_center
+        + 0.12 * positive_hud
+        + 0.10 * positive_scene
+        + 0.08 * positive_scores
+    )
+    threshold = np.percentile(generic_signal, config.generic_peak_threshold_percentile)
+    gameplay_floor = np.percentile(gameplay, 60)
+    candidate_indices: List[int] = []
+    for index, value in enumerate(generic_signal):
+        if value < threshold or gameplay[index] < gameplay_floor:
+            continue
+        left = generic_signal[index - 1] if index > 0 else -np.inf
+        right = generic_signal[index + 1] if index + 1 < len(generic_signal) else -np.inf
+        if value < left or value < right:
+            continue
+        candidate_indices.append(index)
+
+    accepted_indices: List[int] = []
+    segments: List[Segment] = []
+    for index in sorted(candidate_indices, key=lambda item: generic_signal[item], reverse=True):
+        peak_time = float(times[index])
+        if any(abs(peak_time - float(times[accepted])) < config.generic_peak_min_spacing_seconds for accepted in accepted_indices):
+            continue
+        accepted_indices.append(index)
+        start = max(0.0, peak_time - config.pre_roll_seconds)
+        end = min(metadata.duration, peak_time + config.post_roll_seconds)
+        start, end = _clamp_segment(start, end, metadata.duration, config)
+        peak_strength = float(generic_signal[index])
+        label = "slay" if (positive_killfeed[index] + 0.7 * positive_audio[index]) >= 1.25 else "fight"
+        note = "Generic kill-heavy peak window." if label == "slay" else "Generic high-activity fight window."
+        segments.append(
+            Segment(
+                start=start,
+                end=end,
+                score=peak_strength * 2.4 + float(scores[index]) * 0.55 + max(float(gameplay[index]), 0.0) * 0.25,
+                label=label,
+                note=note,
+            )
+        )
+    return segments
+
+
 def _event_weight(name: str) -> float:
     normalized = name.upper()
     if "PENTA" in normalized:
@@ -377,6 +442,21 @@ def _near_kill_event(time_seconds: float, kill_events: List[dict], window: float
         if abs(timestamp - time_seconds) <= window:
             return True
     return False
+
+
+def _extend_diverse_candidates(existing: List[Segment], additions: List[Segment], quota: int) -> List[Segment]:
+    if quota <= 0:
+        return existing
+    merged = list(existing)
+    accepted = 0
+    for candidate in sorted(additions, key=lambda item: item.score, reverse=True):
+        if accepted >= quota:
+            break
+        if any(_overlap(candidate, current) > 0.45 for current in merged):
+            continue
+        merged.append(candidate)
+        accepted += 1
+    return merged
 
 
 def _fit_to_length(values: np.ndarray, target_length: int) -> np.ndarray:
