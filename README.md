@@ -129,6 +129,8 @@ The exact track is chosen automatically from the reel's detected pace.
 
 For YouTube-safe publishing, prefer tracks you downloaded from YouTube Audio Library or music you separately licensed through YouTube Creator Music and list them in the manifest with their local file paths.
 
+If you care about drop-sync specifically, add `drop_times` to your `music_library/tracks.json` entries. Those should be the song timestamps where the main drop or major impact moments happen, and the renderer will shift the song so those moments line up with the strongest gameplay beats.
+
 ## Notes
 
 - Default export quality is now geared toward 1440p source footage.

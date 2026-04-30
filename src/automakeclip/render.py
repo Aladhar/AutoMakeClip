@@ -38,6 +38,7 @@ def snap_segments_to_beats(segments: List[Segment], bpm: float, duration_by_sour
                 label=segment.label,
                 note=segment.note,
                 source_path=segment.source_path,
+                highlight_time=segment.highlight_time,
             )
         )
     return snapped
@@ -91,7 +92,7 @@ def render_montage(plan: MontagePlan, analysis_config: AnalysisConfig, render_co
         )
 
         if plan.music and plan.music.local_path:
-            _mix_music(stitched_path, plan.music, output_path, render_config)
+            _mix_music(stitched_path, plan, output_path, render_config, analysis_config.intro_seconds)
         else:
             run_ffmpeg(
                 [
@@ -231,16 +232,48 @@ def _render_segment(segment: Segment, output_path: Path, config: RenderConfig) -
     )
 
 
-def _mix_music(stitched_path: Path, music: MusicTrack, output_path: Path, config: RenderConfig) -> None:
+def compute_music_start_offset(plan: MontagePlan, intro_seconds: float, montage_duration: float) -> float:
+    music = plan.music
+    if music is None or not music.drop_times:
+        return 0.0
+
+    anchors = _montage_anchor_points(plan.segments, intro_seconds)
+    if not anchors:
+        return 0.0
+
+    candidate_offsets = {0.0}
+    usable_drops = sorted(drop_time for drop_time in music.drop_times if drop_time >= 0.0)
+    for drop_time in usable_drops[:8]:
+        for anchor_time, _, _ in anchors[:6]:
+            offset = drop_time - anchor_time
+            if offset >= 0.0:
+                candidate_offsets.add(round(offset, 3))
+
+    best_offset = 0.0
+    best_error = float("inf")
+    for offset in candidate_offsets:
+        error = _music_alignment_error(anchors, usable_drops, offset, montage_duration)
+        if error < best_error:
+            best_error = error
+            best_offset = offset
+    return max(0.0, best_offset)
+
+
+def _mix_music(stitched_path: Path, plan: MontagePlan, output_path: Path, config: RenderConfig, intro_seconds: float) -> None:
+    music = plan.music
+    if music is None:
+        raise RuntimeError("Music mixing was requested without a selected track.")
     montage_duration = probe_video(stitched_path).duration
     fade_out_start = max(0.0, montage_duration - 1.4)
     music_path = music.local_path
     if music_path is None:
         raise RuntimeError("Music track was selected without a local file.")
+    music_start_offset = compute_music_start_offset(plan, intro_seconds=intro_seconds, montage_duration=montage_duration)
+    music_end = music_start_offset + montage_duration + 0.25
 
     filter_complex = (
         f"[0:a]volume={config.game_audio_gain},aresample=48000[game];"
-        f"[1:a]atrim=0:{montage_duration:.3f},asetpts=N/SR/TB,volume={config.music_gain},"
+        f"[1:a]atrim=start={music_start_offset:.3f}:end={music_end:.3f},asetpts=PTS-STARTPTS,volume={config.music_gain},"
         f"afade=t=in:st=0:d=0.8,afade=t=out:st={fade_out_start:.3f}:d=1.1,aresample=48000[music];"
         "[music][game]sidechaincompress=threshold=0.04:ratio=8:attack=10:release=220:makeup=1.5[ducked];"
         "[game][ducked]amix=inputs=2:weights=1 1:normalize=0[a]"
@@ -299,3 +332,38 @@ def _write_sidecars(plan: MontagePlan) -> None:
             ]
         )
     credits_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _montage_anchor_points(segments: List[Segment], intro_seconds: float) -> List[tuple[float, float, str]]:
+    anchors: List[tuple[float, float, str]] = []
+    current_time = intro_seconds
+    for segment in segments:
+        local_highlight = segment.highlight_time if segment.highlight_time is not None else (segment.start + segment.end) / 2.0
+        local_offset = min(max(local_highlight - segment.start, 0.0), segment.duration)
+        anchor_time = current_time + local_offset
+        weight = 1.8 if segment.label == "slay" else 1.0 if segment.label == "fight" else 0.45
+        anchors.append((anchor_time, weight, segment.label))
+        current_time += segment.duration
+    return anchors
+
+
+def _music_alignment_error(
+    anchors: List[tuple[float, float, str]],
+    drop_times: List[float],
+    music_start_offset: float,
+    montage_duration: float,
+) -> float:
+    shifted_drops = [
+        drop_time - music_start_offset
+        for drop_time in drop_times
+        if 0.0 <= drop_time - music_start_offset <= montage_duration + 6.0
+    ]
+    if not shifted_drops:
+        return 9999.0
+
+    error = 0.0
+    for index, (anchor_time, weight, label) in enumerate(anchors[:6]):
+        nearest = min(abs(anchor_time - drop_time) for drop_time in shifted_drops)
+        emphasis = 1.4 if index == 0 and label == "slay" else 1.0
+        error += min(nearest, 6.0) * weight * emphasis
+    return error + music_start_offset * 0.02

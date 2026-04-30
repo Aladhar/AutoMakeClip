@@ -93,6 +93,7 @@ def main() -> int:
                         label=segment.label,
                         note=segment.note,
                         source_path=str(input_path),
+                        highlight_time=segment.highlight_time,
                     )
                 )
 

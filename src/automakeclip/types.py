@@ -38,6 +38,7 @@ class Segment:
     label: str
     note: str = ""
     source_path: Optional[str] = None
+    highlight_time: Optional[float] = None
 
     @property
     def duration(self) -> float:
@@ -63,6 +64,7 @@ class MusicTrack:
     usage_note: str = ""
     youtube_safe: bool = False
     trend_score: float = 0.0
+    drop_times: List[float] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, object]:
         payload = asdict(self)

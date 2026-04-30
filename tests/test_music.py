@@ -33,6 +33,7 @@ class MusicTests(unittest.TestCase):
                             "source_kind": "youtube_audio_library",
                             "youtube_safe": True,
                             "trend_score": 9.5,
+                            "drop_times": [18.0, 25.5],
                         }
                     ]
                 ),
@@ -50,6 +51,7 @@ class MusicTests(unittest.TestCase):
             self.assertTrue(track.youtube_safe)
             self.assertEqual(track.source_kind, "youtube_audio_library")
             self.assertEqual(track.local_path, track_path)
+            self.assertEqual(track.drop_times, [18.0, 25.5])
 
     def _write_silent_wav(self, path: Path) -> None:
         with wave.open(str(path), "wb") as handle:

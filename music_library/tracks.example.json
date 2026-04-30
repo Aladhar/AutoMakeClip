@@ -11,6 +11,7 @@
     "source_kind": "youtube_audio_library",
     "youtube_safe": true,
     "trend_score": 8.5,
+    "drop_times": [17.6, 25.9, 34.2],
     "usage_note": "Downloaded from YouTube Audio Library. Add attribution if required by the track."
   }
 ]

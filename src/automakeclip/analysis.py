@@ -90,6 +90,7 @@ def extract_candidate_segments(timeline: AnalysisTimeline, metadata: VideoMetada
                 score=candidate.score * 0.88,
                 label="fight",
                 note="High-action fallback window without a logged kill event.",
+                highlight_time=candidate.highlight_time,
             )
             for candidate in heuristic_candidates
         ],
@@ -240,6 +241,7 @@ def _pick_silly_segment(timeline: AnalysisTimeline, metadata: VideoMetadata, con
             score=float(scores[int(best_index)]),
             label="silly",
             note="Short chaos/comedy breath between bigger plays.",
+            highlight_time=midpoint,
         )
         if any(_overlap(segment, item) > 0.45 for item in selected):
             continue
@@ -288,7 +290,7 @@ def _segment_from_range(start_index: int, end_index: int, scores: np.ndarray, ti
 
     label = "slay" if peak_score > np.percentile(scores, 90) else "fight"
     note = "Kill-feed heavy fight window." if label == "slay" else "Active team-fight section."
-    segment = Segment(start=start, end=end, score=peak_score, label=label, note=note)
+    segment = Segment(start=start, end=end, score=peak_score, label=label, note=note, highlight_time=peak_time)
     if segment.duration < config.min_segment_seconds:
         return None
     return segment
@@ -337,7 +339,7 @@ def _extract_event_segments(timeline: AnalysisTimeline, metadata: VideoMetadata,
         score = event_points * 1.15 + local_score * 0.65 + max(local_gameplay, 0.0) * 0.35 + max(local_killfeed, 0.0) * 0.20
         label = "slay" if cluster_size >= 2 or event_points >= 2.2 else "fight"
         note = "SteelSeries multi-kill sequence." if label == "slay" else "SteelSeries kill event window."
-        segments.append(Segment(start=start, end=end, score=score, label=label, note=note))
+        segments.append(Segment(start=start, end=end, score=score, label=label, note=note, highlight_time=last_time))
 
     return segments
 
@@ -399,6 +401,7 @@ def _extract_generic_peak_segments(timeline: AnalysisTimeline, metadata: VideoMe
                 score=peak_strength * 2.4 + float(scores[index]) * 0.55 + max(float(gameplay[index]), 0.0) * 0.25,
                 label=label,
                 note=note,
+                highlight_time=peak_time,
             )
         )
     return segments

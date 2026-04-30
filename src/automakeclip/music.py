@@ -94,6 +94,7 @@ def _fetch_ccmixter_tracks(tags: List[str], config: MusicConfig) -> List[MusicTr
                 tags=tag_list,
                 source_kind="ccmixter",
                 usage_note="Open-web track; verify attribution and platform suitability before publishing.",
+                drop_times=_default_drop_times(bpm),
                 )
         )
     return tracks
@@ -141,6 +142,7 @@ def _load_local_library_tracks(manifest_path: Path) -> List[MusicTrack]:
                 usage_note=str(record.get("usage_note") or ""),
                 youtube_safe=bool(record.get("youtube_safe", False)),
                 trend_score=float(record.get("trend_score") or 0.0),
+                drop_times=_coerce_float_list(record.get("drop_times")) or _default_drop_times(_coerce_float(record.get("bpm"))),
             )
         )
     return tracks
@@ -194,6 +196,20 @@ def _safe_music_filename(track: MusicTrack) -> str:
     title = "".join(character if character.isalnum() else "_" for character in track.title.lower()).strip("_")
     extension = ".wav" if track.download_url == "local://generated" else ".mp3"
     return f"{artist}_{title}{extension}"
+
+
+def _coerce_float_list(value) -> List[float]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return []
+    values: List[float] = []
+    for item in value:
+        numeric = _coerce_float(item)
+        if numeric is None:
+            continue
+        values.append(float(numeric))
+    return values
 
 
 def _coerce_float(value) -> Optional[float]:
@@ -250,6 +266,7 @@ def _synthesize_fallback_track(mood: str, target_bpm: float, output_dir: Path) -
         local_path=output_path,
         source_kind="generated",
         usage_note="Fallback only. Replace with a real licensed track for publishing.",
+        drop_times=_default_drop_times(target_bpm, duration_seconds=96.0),
     )
 
 
@@ -259,6 +276,7 @@ def _write_generated_track(path: Path, mood: str, bpm: float, duration_seconds: 
     total_samples = int(duration_seconds * sample_rate)
     audio = np.zeros(total_samples, dtype=np.float32)
     time_axis = np.arange(total_samples, dtype=np.float32) / sample_rate
+    drop_times = _default_drop_times(bpm, duration_seconds=duration_seconds)
 
     bass_root = 55.0 if mood == "aggro" else 48.0 if mood == "chaotic" else 52.0
     pad_frequency = bass_root * (4.0 if mood == "aggro" else 3.0)
@@ -270,18 +288,22 @@ def _write_generated_track(path: Path, mood: str, bpm: float, duration_seconds: 
     total_beats = int(math.ceil(duration_seconds / beat_seconds))
     for beat_index in range(total_beats):
         beat_time = beat_index * beat_seconds
+        energy = _energy_at_time(beat_time, drop_times)
         for offset in kick_pattern:
-            _mix_kick(audio, sample_rate, beat_time + offset * beat_seconds)
+            _mix_kick(audio, sample_rate, beat_time + offset * beat_seconds, amplitude=0.65 + energy * 0.35)
         for offset in snare_offsets:
-            _mix_snare(audio, sample_rate, beat_time + offset * beat_seconds)
+            _mix_snare(audio, sample_rate, beat_time + offset * beat_seconds, amplitude=0.45 + energy * 0.55)
 
         subdivisions = int(round(1.0 / hat_spacing))
         for hat_index in range(subdivisions * 4):
-            _mix_hat(audio, sample_rate, beat_time + hat_index * hat_spacing * beat_seconds)
+            _mix_hat(audio, sample_rate, beat_time + hat_index * hat_spacing * beat_seconds, amplitude=0.30 + energy * 0.70)
 
-    bass = 0.16 * np.sin(2.0 * np.pi * bass_root * time_axis + 0.35 * np.sin(2.0 * np.pi * 0.5 * time_axis))
+    energy_curve = np.array([_energy_at_time(float(time_value), drop_times) for time_value in time_axis], dtype=np.float32)
+    bass = 0.12 * np.sin(2.0 * np.pi * bass_root * time_axis + 0.35 * np.sin(2.0 * np.pi * 0.5 * time_axis))
+    bass *= 0.55 + energy_curve * 0.65
     pad = 0.08 * np.sin(2.0 * np.pi * pad_frequency * time_axis)
     pad += 0.05 * np.sin(2.0 * np.pi * pad_frequency * 1.5 * time_axis)
+    pad *= 0.85 - energy_curve * 0.22
     wobble = 0.7 + 0.3 * np.sin(2.0 * np.pi * (0.15 if mood == "balanced" else 0.22) * time_axis)
     audio += bass * wobble
     audio += pad
@@ -302,11 +324,11 @@ def _write_generated_track(path: Path, mood: str, bpm: float, duration_seconds: 
         handle.writeframes(pcm.tobytes())
 
 
-def _mix_kick(audio: np.ndarray, sample_rate: int, start_seconds: float) -> None:
-    _mix_percussive_tone(audio, sample_rate, start_seconds, duration_seconds=0.16, start_hz=95.0, end_hz=42.0, amplitude=0.95)
+def _mix_kick(audio: np.ndarray, sample_rate: int, start_seconds: float, amplitude: float) -> None:
+    _mix_percussive_tone(audio, sample_rate, start_seconds, duration_seconds=0.16, start_hz=95.0, end_hz=42.0, amplitude=0.95 * amplitude)
 
 
-def _mix_snare(audio: np.ndarray, sample_rate: int, start_seconds: float) -> None:
+def _mix_snare(audio: np.ndarray, sample_rate: int, start_seconds: float, amplitude: float) -> None:
     start = int(start_seconds * sample_rate)
     duration = int(0.14 * sample_rate)
     if start >= len(audio):
@@ -314,12 +336,12 @@ def _mix_snare(audio: np.ndarray, sample_rate: int, start_seconds: float) -> Non
     end = min(len(audio), start + duration)
     length = end - start
     envelope = np.exp(-np.linspace(0.0, 8.0, length, dtype=np.float32))
-    noise = (np.random.rand(length).astype(np.float32) * 2.0 - 1.0) * 0.32
-    tone = np.sin(2.0 * np.pi * 180.0 * np.arange(length, dtype=np.float32) / sample_rate) * 0.08
+    noise = (np.random.rand(length).astype(np.float32) * 2.0 - 1.0) * (0.32 * amplitude)
+    tone = np.sin(2.0 * np.pi * 180.0 * np.arange(length, dtype=np.float32) / sample_rate) * (0.08 * amplitude)
     audio[start:end] += (noise + tone) * envelope
 
 
-def _mix_hat(audio: np.ndarray, sample_rate: int, start_seconds: float) -> None:
+def _mix_hat(audio: np.ndarray, sample_rate: int, start_seconds: float, amplitude: float) -> None:
     start = int(start_seconds * sample_rate)
     duration = int(0.05 * sample_rate)
     if start >= len(audio):
@@ -327,7 +349,7 @@ def _mix_hat(audio: np.ndarray, sample_rate: int, start_seconds: float) -> None:
     end = min(len(audio), start + duration)
     length = end - start
     envelope = np.exp(-np.linspace(0.0, 18.0, length, dtype=np.float32))
-    noise = (np.random.rand(length).astype(np.float32) * 2.0 - 1.0) * 0.10
+    noise = (np.random.rand(length).astype(np.float32) * 2.0 - 1.0) * (0.10 * amplitude)
     audio[start:end] += noise * envelope
 
 
@@ -352,3 +374,32 @@ def _mix_percussive_tone(
     phase = 2.0 * np.pi * np.cumsum(sweep) / sample_rate
     envelope = np.exp(-np.linspace(0.0, 10.0, length, dtype=np.float32))
     audio[start:end] += np.sin(phase) * envelope * amplitude
+
+
+def _default_drop_times(bpm: Optional[float], duration_seconds: float = 96.0) -> List[float]:
+    if bpm is None or bpm <= 0:
+        return []
+    beat = 60.0 / bpm
+    first_drop = beat * 16.0
+    spacing = beat * 16.0
+    drops: List[float] = []
+    current = first_drop
+    while current < duration_seconds:
+        drops.append(round(current, 3))
+        current += spacing
+    return drops
+
+
+def _energy_at_time(time_seconds: float, drop_times: List[float]) -> float:
+    if not drop_times:
+        return 0.72
+    base = 0.28
+    for drop_time in drop_times:
+        if drop_time - 1.5 <= time_seconds < drop_time:
+            ramp = (time_seconds - (drop_time - 1.5)) / 1.5
+            return min(0.75, base + max(0.0, ramp) * 0.47)
+        if drop_time <= time_seconds < drop_time + 4.0:
+            return 1.0
+    if time_seconds < drop_times[0]:
+        return base
+    return 0.68
