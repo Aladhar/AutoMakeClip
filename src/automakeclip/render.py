@@ -314,11 +314,11 @@ def _build_music_mix_filter(
     fade_out_start: float,
 ) -> str:
     return (
-        f"[0:a]volume={config.game_audio_gain},highpass=f=120,aresample=48000[game];"
+        f"[0:a]volume={config.game_audio_gain},highpass=f=120,aresample=48000[game_sc];"
         f"[1:a]atrim=start={music_start_offset:.3f}:end={music_end:.3f},asetpts=PTS-STARTPTS,volume={config.music_gain},"
-        f"afade=t=in:st=0:d=0.6,afade=t=out:st={fade_out_start:.3f}:d=1.1,aresample=48000[music];"
-        "[game][music]sidechaincompress=threshold=0.08:ratio=10:attack=15:release=250:makeup=1.0[ducked_game];"
-        "[ducked_game][music]amix=inputs=2:weights=0.85 1.0:normalize=0,alimiter=limit=0.95[a]"
+        f"afade=t=in:st=0:d=0.6,afade=t=out:st={fade_out_start:.3f}:d=1.1,aresample=48000,asplit=2[music_sc][music_mix];"
+        "[game_sc][music_sc]sidechaincompress=threshold=0.08:ratio=10:attack=15:release=250:makeup=1.0[ducked_game];"
+        "[ducked_game][music_mix]amix=inputs=2:weights=0.85 1.0:normalize=0,alimiter=limit=0.95[a]"
     )
 
 

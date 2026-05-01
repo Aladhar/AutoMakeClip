@@ -60,7 +60,8 @@ class RenderSyncTests(unittest.TestCase):
             fade_out_start=38.0,
         )
 
-        self.assertIn("[game][music]sidechaincompress", filter_complex)
+        self.assertIn("asplit=2[music_sc][music_mix]", filter_complex)
+        self.assertIn("[game_sc][music_sc]sidechaincompress", filter_complex)
         self.assertIn("weights=0.85 1.0", filter_complex)
         self.assertIn("volume=0.95", filter_complex)
 
