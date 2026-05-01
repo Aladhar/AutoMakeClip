@@ -14,7 +14,7 @@ def _safe_duration(value: Optional[float]) -> float:
         return 0.0
 
 
-def merge_with_transition(prev_path: Path, next_path: Path, out_path: Path, config: RenderConfig, style: str = "fire") -> None:
+def merge_with_transition(prev_path: Path, next_path: Path, out_path: Path, config: RenderConfig, style: str = "smooth") -> None:
     """Merge two already-rendered segment files into a single output using
     an FFmpeg `xfade` transition plus optional overlay asset when available.
 
@@ -136,8 +136,46 @@ def merge_with_transition(prev_path: Path, next_path: Path, out_path: Path, conf
             else:
                 raise
 
-    # Try with fire overlay when requested
+    # Try style-specific renderers: support 'smooth' (soft fade),
+    # 'fire' (overlay blended), or fallback to the basic xfade.
     if style == "fire":
         _run_xfade(True)
+    elif style == "smooth":
+        # prefer a softer cross-dissolve fade transition
+        try:
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-v",
+                "error",
+                "-i",
+                str(prev_path),
+                "-i",
+                str(next_path),
+                "-filter_complex",
+                (
+                    f"[0:v][1:v]xfade=transition=fade:duration={D:.3f}:offset={offset:.3f},format=yuv420p[v];"
+                    f"[0:a][1:a]acrossfade=d={D:.3f}[a]"
+                ),
+                "-map",
+                "[v]",
+                "-map",
+                "[a]",
+                "-c:v",
+                config.video_codec,
+                "-preset",
+                config.preset,
+                "-crf",
+                str(config.crf),
+                "-c:a",
+                config.audio_codec,
+                "-b:a",
+                config.audio_bitrate,
+                str(out_path),
+            ]
+            run_ffmpeg(cmd)
+        except FFmpegError:
+            # fallback to the basic xfade implementation
+            _run_xfade(False)
     else:
         _run_xfade(False)

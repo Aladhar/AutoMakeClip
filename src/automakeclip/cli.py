@@ -86,9 +86,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true", help="Analyze and write the plan without rendering.")
     parser.add_argument(
         "--transition-style",
-        choices=("none", "fire"),
+        choices=("none", "smooth", "fire"),
         default=None,
-        help="Enable transitions between clips; 'fire' uses an overlay asset if present.",
+        help="Enable transitions between clips; 'smooth' is a soft crossfade, 'fire' uses an overlay asset.",
     )
     parser.add_argument(
         "--transition-duration",
