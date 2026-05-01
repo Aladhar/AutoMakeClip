@@ -1,6 +1,6 @@
 import unittest
 
-from automakeclip.selection import select_global_segments, sequence_segments
+from automakeclip.selection import candidate_tier, select_global_segments, sequence_segments
 from automakeclip.types import Segment
 
 
@@ -25,6 +25,45 @@ class SelectionTests(unittest.TestCase):
         ]
         ordered = sequence_segments(segments)
         self.assertEqual([segment.label for segment in ordered], ["slay", "silly", "fight"])
+
+    def test_select_global_segments_prefers_eklipse_style_events_over_huge_fallback_scores(self) -> None:
+        candidates = [
+            Segment(
+                start=0.0,
+                end=5.0,
+                score=120000.0,
+                label="fight",
+                note="High-action fallback window without a logged kill event.",
+                source_path="/tmp/a.mp4",
+            ),
+            Segment(
+                start=10.0,
+                end=15.0,
+                score=90000.0,
+                label="fight",
+                note="High-action fallback window without a logged kill event.",
+                source_path="/tmp/b.mp4",
+            ),
+            Segment(
+                start=20.0,
+                end=25.0,
+                score=6.2,
+                label="slay",
+                note="SteelSeries multi-kill sequence.",
+                source_path="/tmp/c.mp4",
+            ),
+            Segment(
+                start=30.0,
+                end=35.0,
+                score=5.8,
+                label="slay",
+                note="SteelSeries multi-kill sequence.",
+                source_path="/tmp/d.mp4",
+            ),
+        ]
+        selected = select_global_segments(candidates, target_seconds=14.0, intro_seconds=2.4)
+        self.assertEqual([candidate_tier(segment) for segment in selected[:2]], [6, 6])
+        self.assertTrue(all("SteelSeries" in segment.note for segment in selected[:2]))
 
 
 if __name__ == "__main__":
