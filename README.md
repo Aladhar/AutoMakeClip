@@ -10,7 +10,7 @@ AutoMakeClip turns a long Overwatch gameplay recording into a tighter highlight 
 - aligns clip lengths toward the chosen track's beat grid
 - exports a higher-fidelity final montage MP4 plus a credits file for the music
 
-The goal is the vibe you described: compact gameplay cuts, a quick intro, some silly chaos, and the strongest slay moments.
+The goal is the vibe you described: compact gameplay cuts, a quick intro, some silly chaos, and the strongest highlight moments.
 
 ## How It Works
 
@@ -45,7 +45,7 @@ automakeclip \
   --input /path/to/overwatch_take_01.mp4 /path/to/overwatch_take_02.mp4 \
   --output /path/to/overwatch_highlight.mp4 \
   --title "Overwatch Highlight Reel" \
-  --subtitle "slay, chaos, and one stupidly funny fight"
+  --subtitle "big plays, chaos, and one stupidly funny fight"
 ```
 
 Useful options:
@@ -121,7 +121,7 @@ The local-library route is the safest way to use actual songs in a repeatable wo
 
 The picker aims for:
 
-- aggressive electronic / hip-hop for high-intensity slay-heavy reels
+- aggressive electronic / hip-hop for high-intensity highlight-heavy reels
 - bouncier groove-oriented tracks when the reel has more chaos/comedy energy
 - mid-tempo energetic tracks for balanced highlight reels
 

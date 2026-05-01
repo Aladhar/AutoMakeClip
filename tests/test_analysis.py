@@ -37,7 +37,7 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertTrue(candidates)
         best = max(candidates, key=lambda item: item.score)
-        self.assertEqual(best.label, "slay")
+        self.assertEqual(best.label, "highlight")
         self.assertLessEqual(best.start, 12.0)
         self.assertGreaterEqual(best.end, 14.5)
         self.assertIn("SteelSeries", best.note)

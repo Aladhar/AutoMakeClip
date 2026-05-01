@@ -60,7 +60,7 @@ class RenderConfig:
     music_gain: float = 0.20
     game_audio_gain: float = 1.10
     intro_title: str = "OVERWATCH HIGHLIGHTS"
-    intro_subtitle: str = "slay, chaos, and one goofy moment"
+    intro_subtitle: str = "big plays, chaos, and one goofy moment"
     beat_snap_tolerance_seconds: float = 0.40
 
 

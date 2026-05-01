@@ -6,7 +6,7 @@ from automakeclip.types import MontagePlan, MusicTrack, Segment
 
 
 class RenderSyncTests(unittest.TestCase):
-    def test_aligns_first_drop_to_first_slay_anchor(self) -> None:
+    def test_aligns_first_drop_to_first_highlight_anchor(self) -> None:
         plan = MontagePlan(
             input_paths=[Path("/tmp/input.mp4")],
             output_path=Path("/tmp/output.mp4"),
@@ -20,7 +20,7 @@ class RenderSyncTests(unittest.TestCase):
                     start=10.0,
                     end=15.0,
                     score=5.0,
-                    label="slay",
+                    label="highlight",
                     note="",
                     source_path="/tmp/input.mp4",
                     highlight_time=13.8,

@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output", required=True, help="Output highlight MP4.")
     parser.add_argument("--title", default="OVERWATCH HIGHLIGHTS", help="Intro title text.")
-    parser.add_argument("--subtitle", default="slay, chaos, and one goofy moment", help="Intro subtitle text.")
+    parser.add_argument("--subtitle", default="big plays, chaos, and one goofy moment", help="Intro subtitle text.")
     parser.add_argument("--target-seconds", type=float, default=42.0, help="Target runtime for the final montage.")
     parser.add_argument("--no-music", action="store_true", help="Skip automatic music selection and mixing.")
     parser.add_argument("--no-silly", action="store_true", help="Skip the comedy/chaos bridge segment.")

@@ -175,7 +175,7 @@ def extract_borderline_review_segments(
             peak_score=float(scores[index]) * 0.97,
             duration=metadata.duration,
             config=config,
-            label="slay" if (positive_killfeed[index] + 0.6 * positive_audio[index]) >= 1.15 else "fight",
+            label="highlight" if (positive_killfeed[index] + 0.6 * positive_audio[index]) >= 1.15 else "fight",
             note="Borderline discard candidate: active, but likely too weak or too messy for the final montage.",
         )
         if any(_overlap(segment, protected_segment) > 0.40 for protected_segment in protected):
@@ -347,14 +347,14 @@ def infer_montage_profile(segments: List[Segment]) -> Tuple[str, float]:
         return "balanced", 120.0
 
     avg_duration = float(np.mean([segment.duration for segment in segments]))
-    slay_share = sum(1 for segment in segments if segment.label == "slay") / float(len(segments))
+    highlight_share = sum(1 for segment in segments if segment.label == "highlight") / float(len(segments))
     silly_present = any(segment.label == "silly" for segment in segments)
 
-    if slay_share >= 0.72 and avg_duration < 4.9:
+    if highlight_share >= 0.72 and avg_duration < 4.9:
         return "aggro", 152.0 if silly_present else 160.0
     if silly_present:
         return "chaotic", 126.0
-    if slay_share >= 0.50:
+    if highlight_share >= 0.50:
         return "aggro", 148.0
     return "balanced", 138.0
 
@@ -369,8 +369,8 @@ def _segment_from_range(start_index: int, end_index: int, scores: np.ndarray, ti
     peak_time = float(times[peak_index])
     peak_score = float(scores[peak_index])
 
-    label = "slay" if peak_score > np.percentile(scores, 90) else "fight"
-    note = "Kill-feed heavy fight window." if label == "slay" else "Active team-fight section."
+    label = "highlight" if peak_score > np.percentile(scores, 90) else "fight"
+    note = "Kill-feed heavy highlight window." if label == "highlight" else "Active team-fight section."
     segment = _segment_around_peak(
         peak_time=peak_time,
         peak_score=peak_score,
@@ -425,8 +425,8 @@ def _extract_event_segments(timeline: AnalysisTimeline, metadata: VideoMetadata,
         cluster_size = len(cluster)
 
         score = event_points * 1.15 + local_score * 0.65 + max(local_gameplay, 0.0) * 0.35 + max(local_killfeed, 0.0) * 0.20
-        label = "slay" if cluster_size >= 2 or event_points >= 2.2 else "fight"
-        note = "SteelSeries multi-kill sequence." if label == "slay" else "SteelSeries kill event window."
+        label = "highlight" if cluster_size >= 2 or event_points >= 2.2 else "fight"
+        note = "SteelSeries multi-kill sequence." if label == "highlight" else "SteelSeries kill event window."
         segments.append(Segment(start=start, end=end, score=score, label=label, note=note, highlight_time=last_time))
 
     return segments
@@ -480,8 +480,8 @@ def _extract_generic_peak_segments(timeline: AnalysisTimeline, metadata: VideoMe
         end = min(metadata.duration, peak_time + config.post_roll_seconds)
         start, end = _clamp_segment(start, end, metadata.duration, config)
         peak_strength = float(generic_signal[index])
-        label = "slay" if (positive_killfeed[index] + 0.7 * positive_audio[index]) >= 1.25 else "fight"
-        note = "Generic kill-heavy peak window." if label == "slay" else "Generic high-activity fight window."
+        label = "highlight" if (positive_killfeed[index] + 0.7 * positive_audio[index]) >= 1.25 else "fight"
+        note = "Generic kill-heavy peak window." if label == "highlight" else "Generic high-activity fight window."
         segments.append(
             Segment(
                 start=start,

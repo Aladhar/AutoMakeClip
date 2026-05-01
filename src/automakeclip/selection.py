@@ -63,7 +63,7 @@ def candidate_tier(segment: Segment) -> int:
         return 4
     if "generic kill-heavy peak window" in note or "kill-feed heavy fight window" in note:
         return 3
-    if segment.label == "slay":
+    if segment.label == "highlight":
         return 2
     if "fallback" in note or "generic high-activity fight window" in note or "active team-fight" in note:
         return 1

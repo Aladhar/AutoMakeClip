@@ -341,7 +341,7 @@ def _montage_anchor_points(segments: List[Segment], intro_seconds: float) -> Lis
         local_highlight = segment.highlight_time if segment.highlight_time is not None else (segment.start + segment.end) / 2.0
         local_offset = min(max(local_highlight - segment.start, 0.0), segment.duration)
         anchor_time = current_time + local_offset
-        weight = 1.8 if segment.label == "slay" else 1.0 if segment.label == "fight" else 0.45
+        weight = 1.8 if segment.label == "highlight" else 1.0 if segment.label == "fight" else 0.45
         anchors.append((anchor_time, weight, segment.label))
         current_time += segment.duration
     return anchors
@@ -364,6 +364,6 @@ def _music_alignment_error(
     error = 0.0
     for index, (anchor_time, weight, label) in enumerate(anchors[:6]):
         nearest = min(abs(anchor_time - drop_time) for drop_time in shifted_drops)
-        emphasis = 1.4 if index == 0 and label == "slay" else 1.0
+        emphasis = 1.4 if index == 0 and label == "highlight" else 1.0
         error += min(nearest, 6.0) * weight * emphasis
     return error + music_start_offset * 0.02
