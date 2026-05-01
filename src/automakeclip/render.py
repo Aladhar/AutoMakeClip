@@ -5,6 +5,7 @@ from typing import Dict, List
 
 from .config import AnalysisConfig, RenderConfig
 from .ffmpeg import probe_video, run_ffmpeg
+from .transitions import merge_with_transition
 from .types import MontagePlan, MusicTrack, Segment
 
 
@@ -64,34 +65,44 @@ def render_montage(plan: MontagePlan, analysis_config: AnalysisConfig, render_co
             segment_paths.append(segment_path)
 
         concat_entries = [intro_path] + segment_paths
-        concat_file = temp_dir / "concat.txt"
-        concat_file.write_text("".join(f"file '{path.as_posix()}'\n" for path in concat_entries), encoding="utf-8")
 
-        run_ffmpeg(
-            [
-                "ffmpeg",
-                "-y",
-                "-v",
-                "error",
-                "-f",
-                "concat",
-                "-safe",
-                "0",
-                "-i",
-                str(concat_file),
-                "-c:v",
-                render_config.video_codec,
-                "-preset",
-                render_config.preset,
-                "-crf",
-                str(render_config.crf),
-                "-c:a",
-                render_config.audio_codec,
-                "-b:a",
-                render_config.audio_bitrate,
-                str(stitched_path),
-            ]
-        )
+        if render_config.transition_style == "none":
+            concat_file = temp_dir / "concat.txt"
+            concat_file.write_text("".join(f"file '{path.as_posix()}'\n" for path in concat_entries), encoding="utf-8")
+
+            run_ffmpeg(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-v",
+                    "error",
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "0",
+                    "-i",
+                    str(concat_file),
+                    "-c:v",
+                    render_config.video_codec,
+                    "-preset",
+                    render_config.preset,
+                    "-crf",
+                    str(render_config.crf),
+                    "-c:a",
+                    render_config.audio_codec,
+                    "-b:a",
+                    render_config.audio_bitrate,
+                    str(stitched_path),
+                ]
+            )
+        else:
+            # Sequentially merge each pair using the configured transition
+            current = concat_entries[0]
+            for idx, next_item in enumerate(concat_entries[1:], start=1):
+                merged = temp_dir / f"stitched_{idx:02d}.mp4"
+                merge_with_transition(Path(current), Path(next_item), merged, render_config, style=render_config.transition_style)
+                current = merged
+            stitched_path = Path(current)
 
         if plan.music and plan.music.local_path:
             _mix_music(stitched_path, plan, output_path, render_config, analysis_config.intro_seconds)

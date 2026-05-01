@@ -62,6 +62,12 @@ class RenderConfig:
     intro_title: str = "OVERWATCH HIGHLIGHTS"
     intro_subtitle: str = "big plays, chaos, and one goofy moment"
     beat_snap_tolerance_seconds: float = 0.40
+    # Transition settings: 'none' disables transitions, otherwise the name
+    # of the transition style (e.g. 'fire'). Transition assets are looked up
+    # under `transition_asset_dir` when applicable.
+    transition_style: str = "none"
+    transition_duration: float = 0.6
+    transition_asset_dir: str = "assets/transitions"
 
 
 @dataclass
