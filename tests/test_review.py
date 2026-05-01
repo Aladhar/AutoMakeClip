@@ -1,32 +1,12 @@
+import tempfile
 import unittest
 from pathlib import Path
-import tempfile
 
-from automakeclip.review import _load_labels, _store_labels, select_review_samples
-from automakeclip.types import Segment
+from automakeclip.inputs import looks_like_non_gameplay_source
+from automakeclip.review import _load_labels, _review_html, _store_labels
 
 
 class ReviewTests(unittest.TestCase):
-    def test_select_review_samples_respects_limit_and_diversity(self) -> None:
-        candidates = [
-            Segment(start=0.0, end=5.0, score=9.0 - index, label="slay", note="", source_path=f"/tmp/source_{index // 2}.mp4")
-            for index in range(8)
-        ]
-        selected = select_review_samples(candidates, 4)
-        self.assertEqual(len(selected), 4)
-        self.assertLessEqual(len({item.source_path for item in selected}), 4)
-
-    def test_select_review_samples_prefers_uncertain_generic_fights(self) -> None:
-        candidates = [
-            Segment(start=10.0, end=15.0, score=8.8, label="slay", note="SteelSeries multi-kill sequence.", source_path="/tmp/a.mp4"),
-            Segment(start=20.0, end=25.0, score=5.2, label="fight", note="Generic high-activity fight window.", source_path="/tmp/b.mp4"),
-            Segment(start=30.0, end=35.0, score=5.0, label="fight", note="Generic kill-heavy peak window.", source_path="/tmp/c.mp4"),
-            Segment(start=40.0, end=45.0, score=1.1, label="fight", note="SteelSeries kill event window.", source_path="/tmp/d.mp4"),
-        ]
-        selected = select_review_samples(candidates, 2)
-        notes = [item.note for item in selected]
-        self.assertTrue(any("Generic" in note for note in notes))
-
     def test_feedback_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             labels_path = Path(temp_root) / "labels.json"
@@ -40,6 +20,23 @@ class ReviewTests(unittest.TestCase):
             self.assertEqual(payload["decisions"]["clip-001"], "yes")
             self.assertEqual(payload["clip_feedback"]["clip-001"], "great kill confirm")
             self.assertEqual(payload["session_feedback"], "more clips like this")
+
+    def test_review_ui_uses_arrow_only_navigation_shortcuts(self) -> None:
+        html = _review_html()
+        self.assertIn("event.key === 'ArrowLeft'", html)
+        self.assertIn("event.key === 'ArrowRight'", html)
+        self.assertNotIn("event.key === 'y'", html)
+        self.assertNotIn("event.key === 'n'", html)
+        self.assertNotIn("event.key === 's'", html)
+
+    def test_review_ui_no_longer_shows_uncertainty_buckets(self) -> None:
+        html = _review_html()
+        self.assertNotIn("uncertainty", html)
+        self.assertNotIn("review_bucket", html)
+
+    def test_detects_non_gameplay_source_names(self) -> None:
+        self.assertTrue(looks_like_non_gameplay_source(Path("/tmp/zoom_0.mp4")))
+        self.assertFalse(looks_like_non_gameplay_source(Path("/tmp/Overwatch__2026-03-06__20-04-22.mp4")))
 
 
 if __name__ == "__main__":

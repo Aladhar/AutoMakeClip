@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import List
 
 from .config import AppConfig
-from .inputs import InputResolutionError, resolve_inputs
+from .inputs import InputResolutionError, looks_like_non_gameplay_source, resolve_inputs
+from .selection import select_global_segments, sequence_segments
 from .types import Segment
 from .types import MontagePlan
 
@@ -30,6 +31,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-cache", action="store_true", help="Disable per-video analysis cache reads and writes.")
     parser.add_argument("--keep-temp", action="store_true", help="Keep intermediate rendered files.")
     parser.add_argument("--dry-run", action="store_true", help="Analyze and write the plan without rendering.")
+    parser.add_argument(
+        "--youtube-playlist-limit",
+        type=int,
+        default=24,
+        help="When an input is a YouTube /streams page, limit how many recent stream VODs are pulled in.",
+    )
     return parser
 
 
@@ -49,7 +56,11 @@ def main() -> int:
         )
         return 2
 
-    input_paths = resolve_inputs(args.input, download_root=Path.cwd() / ".automakeclip_downloads")
+    input_paths = resolve_inputs(
+        args.input,
+        download_root=Path.cwd() / ".automakeclip_downloads",
+        youtube_playlist_limit=max(1, args.youtube_playlist_limit),
+    )
     output_path = Path(args.output).expanduser().resolve()
     missing_paths = [path for path in input_paths if not path.exists()]
     if missing_paths:
@@ -66,6 +77,9 @@ def main() -> int:
 
         for index, input_path in enumerate(input_paths, start=1):
             prefix = f"[{index}/{total_inputs}]"
+            if looks_like_non_gameplay_source(input_path):
+                print(f"{prefix} skip non-gameplay source {input_path.name}", file=sys.stderr)
+                continue
             cached = load_analysis_cache(cache_dir, input_path, config.analysis) if use_cache else None
             if cached is not None:
                 metadata, timeline = cached
@@ -102,7 +116,7 @@ def main() -> int:
         if not candidate_segments:
             raise RuntimeError("No highlight segments were detected. Try lowering the threshold or using a more action-heavy take.")
 
-        selected = _select_global_segments(
+        selected = select_global_segments(
             candidate_segments,
             target_seconds=args.target_seconds,
             intro_seconds=config.analysis.intro_seconds,
@@ -112,7 +126,7 @@ def main() -> int:
 
         mood, target_bpm = infer_montage_profile(selected)
         snapped = snap_segments_to_beats(
-            _sequence_segments(selected),
+            sequence_segments(selected),
             bpm=target_bpm,
             duration_by_source=source_durations,
             tolerance=config.render.beat_snap_tolerance_seconds,
@@ -162,46 +176,6 @@ def main() -> int:
     except (FFmpegError, MusicSelectionError, InputResolutionError, RuntimeError) as error:
         print(str(error), file=sys.stderr)
         return 1
-
-
-def _select_global_segments(candidates: List[Segment], target_seconds: float, intro_seconds: float) -> List[Segment]:
-    budget = max(8.0, target_seconds - intro_seconds)
-    selected: List[Segment] = []
-    silly_used = False
-
-    for candidate in sorted(candidates, key=lambda segment: segment.score, reverse=True):
-        if candidate.label == "silly" and silly_used:
-            continue
-        if any(_same_source_overlap(candidate, existing) > 0.60 for existing in selected):
-            continue
-        if sum(item.duration for item in selected) + candidate.duration > budget + 1.5 and selected:
-            continue
-        selected.append(candidate)
-        if candidate.label == "silly":
-            silly_used = True
-        if sum(item.duration for item in selected) >= budget:
-            break
-    return selected
-
-
-def _sequence_segments(segments: List[Segment]) -> List[Segment]:
-    silly_segments = [segment for segment in segments if segment.label == "silly"]
-    core_segments = [segment for segment in segments if segment.label != "silly"]
-    ordered = sorted(core_segments, key=lambda segment: segment.score, reverse=True)
-    if silly_segments:
-        insert_at = min(len(ordered), max(1, len(ordered) // 3))
-        ordered.insert(insert_at, max(silly_segments, key=lambda segment: segment.score))
-    return ordered
-
-
-def _same_source_overlap(first: Segment, second: Segment) -> float:
-    if first.source_path != second.source_path:
-        return 0.0
-    intersection = max(0.0, min(first.end, second.end) - max(first.start, second.start))
-    if intersection <= 0.0:
-        return 0.0
-    return intersection / max(min(first.duration, second.duration), 1e-6)
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

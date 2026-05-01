@@ -118,6 +118,78 @@ def extract_candidate_segments(timeline: AnalysisTimeline, metadata: VideoMetada
     return candidates or heuristic_candidates
 
 
+def extract_borderline_review_segments(
+    timeline: AnalysisTimeline,
+    metadata: VideoMetadata,
+    config: AnalysisConfig,
+    protected_segments: Optional[List[Segment]] = None,
+) -> List[Segment]:
+    protected = list(protected_segments) if protected_segments is not None else extract_candidate_segments(timeline, metadata, config)
+    times = np.array(timeline.times, dtype=np.float32)
+    scores = np.array(timeline.scores, dtype=np.float32)
+    gameplay = np.array(timeline.gameplay_confidence, dtype=np.float32)
+    killfeed = np.array(timeline.killfeed_motion, dtype=np.float32)
+    center = np.array(timeline.center_motion, dtype=np.float32)
+    audio_flux = np.array(timeline.audio_flux, dtype=np.float32)
+    scenes = np.array(timeline.scene_change, dtype=np.float32)
+
+    lower = np.percentile(scores, max(52.0, config.highlight_threshold_percentile - 16.0))
+    upper = np.percentile(scores, min(92.0, config.highlight_threshold_percentile + 4.0))
+    gameplay_floor = np.percentile(gameplay, 55)
+    band_halfwidth = max((upper - lower) / 2.0, 1e-6)
+    band_midpoint = (lower + upper) / 2.0
+
+    positive_killfeed = np.clip(_robust_normalize(killfeed), 0.0, None)
+    positive_center = np.clip(_robust_normalize(center), 0.0, None)
+    positive_audio = np.clip(_robust_normalize(audio_flux), 0.0, None)
+    positive_scenes = np.clip(_robust_normalize(scenes), 0.0, None)
+    score_band_closeness = 1.0 - np.minimum(np.abs(scores - band_midpoint) / band_halfwidth, 1.0)
+    borderline_metric = (
+        0.42 * score_band_closeness
+        + 0.23 * positive_killfeed
+        + 0.17 * positive_audio
+        + 0.10 * positive_center
+        + 0.08 * positive_scenes
+    )
+    mask = (scores >= lower) & (scores <= upper) & (gameplay >= gameplay_floor)
+    candidate_indices: List[int] = []
+    for index, value in enumerate(borderline_metric):
+        if not mask[index]:
+            continue
+        left = borderline_metric[index - 1] if index > 0 else -np.inf
+        right = borderline_metric[index + 1] if index + 1 < len(borderline_metric) else -np.inf
+        if value < left or value < right:
+            continue
+        candidate_indices.append(index)
+
+    segments: List[Segment] = []
+    accepted_peak_times: List[float] = []
+    max_segments = max(2, min(5, config.fallback_fight_quota + 3))
+    min_spacing_seconds = max(2.0, config.generic_peak_min_spacing_seconds - 0.5)
+    for index in sorted(candidate_indices, key=lambda item: borderline_metric[item], reverse=True):
+        peak_time = float(times[index])
+        if any(abs(peak_time - accepted) < min_spacing_seconds for accepted in accepted_peak_times):
+            continue
+        segment = _segment_around_peak(
+            peak_time=peak_time,
+            peak_score=float(scores[index]) * 0.97,
+            duration=metadata.duration,
+            config=config,
+            label="slay" if (positive_killfeed[index] + 0.6 * positive_audio[index]) >= 1.15 else "fight",
+            note="Borderline discard candidate: active, but likely too weak or too messy for the final montage.",
+        )
+        if any(_overlap(segment, protected_segment) > 0.40 for protected_segment in protected):
+            continue
+        if any(_overlap(segment, existing) > 0.45 for existing in segments):
+            continue
+        segments.append(segment)
+        accepted_peak_times.append(peak_time)
+        if len(segments) >= max_segments:
+            break
+
+    return segments
+
+
 def _extract_heuristic_segments(timeline: AnalysisTimeline, metadata: VideoMetadata, config: AnalysisConfig) -> List[Segment]:
     times = np.array(timeline.times, dtype=np.float32)
     scores = np.array(timeline.scores, dtype=np.float32)
@@ -297,19 +369,16 @@ def _segment_from_range(start_index: int, end_index: int, scores: np.ndarray, ti
     peak_time = float(times[peak_index])
     peak_score = float(scores[peak_index])
 
-    start = max(0.0, peak_time - config.pre_roll_seconds)
-    end = min(duration, peak_time + config.post_roll_seconds)
-    segment_duration = end - start
-    if segment_duration < config.min_segment_seconds:
-        extension = (config.min_segment_seconds - segment_duration) / 2.0
-        start = max(0.0, start - extension)
-        end = min(duration, end + extension)
-    if (end - start) > config.max_segment_seconds:
-        end = start + config.max_segment_seconds
-
     label = "slay" if peak_score > np.percentile(scores, 90) else "fight"
     note = "Kill-feed heavy fight window." if label == "slay" else "Active team-fight section."
-    segment = Segment(start=start, end=end, score=peak_score, label=label, note=note, highlight_time=peak_time)
+    segment = _segment_around_peak(
+        peak_time=peak_time,
+        peak_score=peak_score,
+        duration=duration,
+        config=config,
+        label=label,
+        note=note,
+    )
     if segment.duration < config.min_segment_seconds:
         return None
     return segment
@@ -437,6 +506,26 @@ def _event_weight(name: str) -> float:
     if "DOUBLE" in normalized:
         return 2.0
     return 1.0
+
+
+def _segment_around_peak(
+    peak_time: float,
+    peak_score: float,
+    duration: float,
+    config: AnalysisConfig,
+    label: str,
+    note: str,
+) -> Segment:
+    start = max(0.0, peak_time - config.pre_roll_seconds)
+    end = min(duration, peak_time + config.post_roll_seconds)
+    segment_duration = end - start
+    if segment_duration < config.min_segment_seconds:
+        extension = (config.min_segment_seconds - segment_duration) / 2.0
+        start = max(0.0, start - extension)
+        end = min(duration, end + extension)
+    if (end - start) > config.max_segment_seconds:
+        end = start + config.max_segment_seconds
+    return Segment(start=start, end=end, score=peak_score, label=label, note=note, highlight_time=peak_time)
 
 
 def _clamp_segment(start: float, end: float, duration: float, config: AnalysisConfig) -> Tuple[float, float]:

@@ -1,6 +1,6 @@
 import unittest
 
-from automakeclip.analysis import extract_candidate_segments
+from automakeclip.analysis import extract_borderline_review_segments, extract_candidate_segments
 from automakeclip.config import AnalysisConfig
 from automakeclip.types import AnalysisTimeline, VideoMetadata
 
@@ -65,6 +65,28 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(candidates)
         self.assertTrue(any("Generic" in candidate.note for candidate in candidates))
         self.assertTrue(any(candidate.highlight_time is not None for candidate in candidates))
+
+    def test_extracts_borderline_review_segments_from_midband_activity(self) -> None:
+        timeline = AnalysisTimeline(
+            times=[0.0, 8.0, 16.0, 24.0, 32.0, 40.0, 48.0, 56.0, 64.0],
+            visual_motion=[0.1, 0.18, 0.48, 0.36, 0.95, 0.34, 0.45, 0.16, 0.1],
+            killfeed_motion=[0.0, 0.08, 0.31, 0.22, 1.05, 0.24, 0.29, 0.06, 0.0],
+            hud_motion=[0.04, 0.09, 0.21, 0.16, 0.82, 0.18, 0.2, 0.08, 0.04],
+            center_motion=[0.05, 0.1, 0.34, 0.28, 0.92, 0.3, 0.33, 0.09, 0.05],
+            audio_rms=[0.02, 0.03, 0.14, 0.12, 0.46, 0.13, 0.15, 0.03, 0.02],
+            audio_flux=[0.01, 0.02, 0.12, 0.08, 0.58, 0.09, 0.11, 0.02, 0.01],
+            scene_change=[0.01, 0.02, 0.09, 0.07, 0.38, 0.08, 0.1, 0.02, 0.01],
+            gameplay_confidence=[-0.2, -0.1, 0.34, 0.24, 0.97, 0.25, 0.31, -0.08, -0.2],
+            scores=[-0.14, -0.04, 0.48, 0.34, 1.16, 0.36, 0.46, -0.03, -0.11],
+            duration=68.0,
+        )
+        metadata = VideoMetadata(duration=68.0, width=1920, height=1080, fps=60.0)
+
+        borderline = extract_borderline_review_segments(timeline, metadata, AnalysisConfig(), protected_segments=[])
+
+        self.assertTrue(borderline)
+        self.assertTrue(all(item.note.startswith("Borderline discard candidate:") for item in borderline))
+        self.assertTrue(any(item.highlight_time in {16.0, 48.0} for item in borderline))
 
 
 if __name__ == "__main__":

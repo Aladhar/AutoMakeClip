@@ -19,13 +19,13 @@ class YoutubeEntry:
     webpage_url: str
 
 
-def resolve_inputs(raw_inputs: List[List[str]], download_root: Path) -> List[Path]:
+def resolve_inputs(raw_inputs: List[List[str]], download_root: Path, youtube_playlist_limit: int = 24) -> List[Path]:
     resolved: List[Path] = []
     seen = set()
     for group in raw_inputs:
         for value in group:
             if _is_probable_url(value):
-                for path in _resolve_url_input(value, download_root):
+                for path in _resolve_url_input(value, download_root, youtube_playlist_limit):
                     if path not in seen:
                         resolved.append(path)
                         seen.add(path)
@@ -44,12 +44,12 @@ def resolve_inputs(raw_inputs: List[List[str]], download_root: Path) -> List[Pat
     return resolved
 
 
-def _resolve_url_input(url: str, download_root: Path) -> List[Path]:
+def _resolve_url_input(url: str, download_root: Path, youtube_playlist_limit: int) -> List[Path]:
     yt_dlp_command = _yt_dlp_command()
 
     urls = [url]
     if _looks_like_youtube_streams_page(url):
-        entries = _list_youtube_entries(url, playlist_limit=24, yt_dlp_command=yt_dlp_command)
+        entries = _list_youtube_entries(url, playlist_limit=youtube_playlist_limit, yt_dlp_command=yt_dlp_command)
         filtered = _filter_overwatch_entries(entries)
         urls = [entry.webpage_url for entry in (filtered or entries)]
         if not urls:
@@ -135,6 +135,11 @@ def _filter_overwatch_entries(entries: Sequence[YoutubeEntry]) -> List[YoutubeEn
     return filtered
 
 
+def looks_like_non_gameplay_source(path: Path) -> bool:
+    name = path.name.lower()
+    return name.startswith("zoom_") or " zoom " in name or "zoomcall" in name or "meeting" in name
+
+
 def _looks_like_youtube_streams_page(url: str) -> bool:
     parsed = urlparse(url)
     host = parsed.netloc.lower()
@@ -153,6 +158,12 @@ def _yt_dlp_command() -> List[str]:
     binary = shutil.which("yt-dlp")
     if binary is not None:
         return [binary]
+    user_binary = Path.home() / "Library" / "Python" / "3.14" / "bin" / "yt-dlp"
+    if user_binary.exists():
+        return [str(user_binary)]
+    homebrew_python = Path("/opt/homebrew/bin/python3")
+    if homebrew_python.exists() and _command_supports_yt_dlp([str(homebrew_python), "-m", "yt_dlp"]):
+        return [str(homebrew_python), "-m", "yt_dlp"]
     try:
         __import__("yt_dlp")
     except ModuleNotFoundError as error:
@@ -160,3 +171,14 @@ def _yt_dlp_command() -> List[str]:
             "URL inputs require `yt-dlp`. Install it or pass downloaded MP4 files instead."
         ) from error
     return [sys.executable, "-m", "yt_dlp"]
+
+
+def _command_supports_yt_dlp(command: Sequence[str]) -> bool:
+    process = subprocess.run(
+        [*command, "--version"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return process.returncode == 0

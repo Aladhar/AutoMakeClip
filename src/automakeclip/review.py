@@ -12,7 +12,8 @@ from typing import Dict, List
 from urllib.parse import unquote, urlparse
 
 from .config import AppConfig, RenderConfig
-from .inputs import InputResolutionError, resolve_inputs
+from .inputs import InputResolutionError, looks_like_non_gameplay_source, resolve_inputs
+from .selection import select_global_segments, sequence_segments
 from .types import Segment
 
 
@@ -26,7 +27,6 @@ class ReviewClip:
     label: str
     note: str
     filename: str
-    uncertainty: float = 0.0
 
 
 @dataclass
@@ -38,7 +38,7 @@ class ReviewState:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Review sampled highlight clips with a yes/no UI.")
+    parser = argparse.ArgumentParser(description="Review the actual clips selected for the final montage.")
     parser.add_argument(
         "--input",
         required=True,
@@ -46,11 +46,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Source MP4 files, folders, or YouTube URLs.",
     )
-    parser.add_argument("--samples", type=int, default=18, help="How many sampled clips to generate for review.")
+    parser.add_argument("--samples", type=int, default=0, help="Optional cap on how many final selected clips to review.")
     parser.add_argument("--port", type=int, default=8765, help="Port for the local review UI.")
     parser.add_argument("--host", default="127.0.0.1", help="Host interface for the local review UI.")
     parser.add_argument("--session-dir", default="", help="Optional review session directory.")
     parser.add_argument("--no-cache", action="store_true", help="Disable per-video analysis cache.")
+    parser.add_argument("--target-seconds", type=float, default=42.0, help="Match the final montage target runtime.")
+    parser.add_argument("--no-silly", action="store_true", help="Skip the comedy/chaos bridge segment.")
+    parser.add_argument(
+        "--youtube-playlist-limit",
+        type=int,
+        default=24,
+        help="When an input is a YouTube /streams page, limit how many recent stream VODs are pulled in.",
+    )
     return parser
 
 
@@ -58,7 +66,7 @@ def main() -> int:
     args = build_parser().parse_args()
     config = AppConfig()
     try:
-        from .analysis import analyze_gameplay, extract_candidate_segments
+        from .analysis import analyze_gameplay, pick_segments
         from .cache import load_analysis_cache, store_analysis_cache
         from .ffmpeg import FFmpegError, ensure_ffmpeg, probe_video, run_ffmpeg
     except ModuleNotFoundError as error:
@@ -74,7 +82,11 @@ def main() -> int:
     session_path = session_dir / "session.json"
     try:
         ensure_ffmpeg()
-        input_paths = resolve_inputs(args.input, download_root=Path.cwd() / ".automakeclip_downloads")
+        input_paths = resolve_inputs(
+            args.input,
+            download_root=Path.cwd() / ".automakeclip_downloads",
+            youtube_playlist_limit=max(1, args.youtube_playlist_limit),
+        )
         cache_dir = Path.cwd() / config.cache.directory_name
         use_cache = config.cache.enabled and not args.no_cache
 
@@ -82,6 +94,9 @@ def main() -> int:
         total_inputs = len(input_paths)
         for index, input_path in enumerate(input_paths, start=1):
             prefix = f"[{index}/{total_inputs}]"
+            if looks_like_non_gameplay_source(input_path):
+                print(f"{prefix} skip non-gameplay source {input_path.name}", file=sys.stderr)
+                continue
             cached = load_analysis_cache(cache_dir, input_path, config.analysis) if use_cache else None
             if cached is not None:
                 metadata, timeline = cached
@@ -92,7 +107,14 @@ def main() -> int:
                 timeline = analyze_gameplay(input_path, metadata, config.analysis)
                 if use_cache:
                     store_analysis_cache(cache_dir, input_path, config.analysis, metadata, timeline)
-            for segment in extract_candidate_segments(timeline, metadata, config.analysis):
+            file_segments, _ = pick_segments(
+                timeline,
+                metadata,
+                config.analysis,
+                target_seconds=args.target_seconds,
+                include_silly=not args.no_silly,
+            )
+            for segment in file_segments:
                 candidates.append(
                     Segment(
                         start=segment.start,
@@ -101,18 +123,29 @@ def main() -> int:
                         label=segment.label,
                         note=segment.note,
                         source_path=str(input_path),
+                        highlight_time=segment.highlight_time,
                     )
                 )
 
-        samples = select_review_samples(candidates, args.samples)
-        if not samples:
-            raise RuntimeError("No candidate clips were generated for review.")
+        if not candidates:
+            raise RuntimeError("No highlight clips were selected for review.")
+
+        selected = sequence_segments(
+            select_global_segments(
+                candidates,
+                target_seconds=args.target_seconds,
+                intro_seconds=config.analysis.intro_seconds,
+            )
+        )
+        if args.samples > 0:
+            selected = selected[: args.samples]
+        if not selected:
+            raise RuntimeError("No final montage clips survived selection.")
 
         clips_dir.mkdir(parents=True, exist_ok=True)
         preview_render = RenderConfig(width=1280, height=720, fps=30, crf=22, preset="veryfast")
         review_clips: List[ReviewClip] = []
-        uncertainty_by_key = _uncertainty_scores(samples)
-        for index, segment in enumerate(samples, start=1):
+        for index, segment in enumerate(selected, start=1):
             clip_id = f"clip-{index:03d}"
             filename = f"{clip_id}.mp4"
             output_path = clips_dir / filename
@@ -127,7 +160,6 @@ def main() -> int:
                     label=segment.label,
                     note=segment.note,
                     filename=filename,
-                    uncertainty=uncertainty_by_key.get(_segment_key(segment), 0.0),
                 )
             )
 
@@ -150,44 +182,6 @@ def main() -> int:
     except (FFmpegError, InputResolutionError, RuntimeError) as error:
         print(str(error), file=sys.stderr)
         return 1
-
-
-def select_review_samples(candidates: List[Segment], sample_count: int) -> List[Segment]:
-    if sample_count <= 0 or not candidates:
-        return []
-
-    uncertainty_map = _uncertainty_scores(candidates)
-    ordered = sorted(
-        candidates,
-        key=lambda item: (uncertainty_map.get(_segment_key(item), 0.0), item.score),
-        reverse=True,
-    )
-
-    selected: List[Segment] = []
-    label_quotas = {
-        "fight": max(1, sample_count // 3),
-        "slay": max(1, sample_count // 4),
-        "silly": 1,
-    }
-    label_counts = {"fight": 0, "slay": 0, "silly": 0}
-
-    for candidate in ordered:
-        if len(selected) >= sample_count:
-            break
-        if any(_same_source_overlap(candidate, existing) > 0.55 for existing in selected):
-            continue
-        if label_counts.get(candidate.label, 0) < label_quotas.get(candidate.label, 0):
-            selected.append(candidate)
-            label_counts[candidate.label] = label_counts.get(candidate.label, 0) + 1
-
-    for candidate in ordered:
-        if len(selected) >= sample_count:
-            break
-        if any(_same_source_overlap(candidate, existing) > 0.55 for existing in selected):
-            continue
-        selected.append(candidate)
-
-    return selected[:sample_count]
 
 
 def _render_review_clip(run_ffmpeg, segment: Segment, output_path: Path, config: RenderConfig) -> None:
@@ -505,13 +499,13 @@ def _review_html() -> str:
       <video id="player" controls autoplay></video>
       <div class="row">
         <div class="buttons">
-          <button class="yes" onclick="label('yes')">Yes</button>
-          <button class="no" onclick="label('no')">No</button>
-          <button class="skip" onclick="label('skip')">Skip</button>
+          <button type="button" class="yes" onclick="label('yes')">Yes</button>
+          <button type="button" class="no" onclick="label('no')">No</button>
+          <button type="button" class="skip" onclick="label('skip')">Skip</button>
         </div>
         <div class="buttons">
-          <button class="skip" onclick="move(-1)">Prev</button>
-          <button class="skip" onclick="move(1)">Next</button>
+          <button type="button" class="skip" onclick="move(-1)">Prev</button>
+          <button type="button" class="skip" onclick="move(1)">Next</button>
         </div>
       </div>
       <div class="meta">
@@ -526,7 +520,7 @@ def _review_html() -> str:
           <div class="row">
             <div class="small" id="clipFeedbackStatus">No clip feedback saved yet.</div>
             <div class="buttons">
-              <button class="skip" onclick="saveClipFeedback()">Save Clip Feedback</button>
+              <button type="button" class="skip" onclick="saveClipFeedback()">Save Clip Feedback</button>
             </div>
           </div>
         </div>
@@ -536,7 +530,7 @@ def _review_html() -> str:
           <div class="row">
             <div class="small" id="sessionFeedbackStatus">No session feedback saved yet.</div>
             <div class="buttons">
-              <button class="skip" onclick="saveSessionFeedback()">Save Session Feedback</button>
+              <button type="button" class="skip" onclick="saveSessionFeedback()">Save Session Feedback</button>
             </div>
           </div>
         </div>
@@ -573,7 +567,7 @@ def _review_html() -> str:
         player.play().catch(() => {});
       }
       document.getElementById('pills').innerHTML =
-        `<span class="pill">${clip.label}</span><span class="pill">score ${clip.score.toFixed(2)}</span><span class="pill">uncertainty ${clip.uncertainty.toFixed(2)}</span><span class="pill">decision ${clip.decision || 'pending'}</span>`;
+        `<span class="pill">${clip.label}</span><span class="pill">score ${clip.score.toFixed(2)}</span><span class="pill">decision ${clip.decision || 'pending'}</span>`;
       document.getElementById('source').textContent =
         `${clip.source_path} | ${clip.start.toFixed(2)}s - ${clip.end.toFixed(2)}s`;
       document.getElementById('note').textContent = clip.note || '';
@@ -583,6 +577,16 @@ def _review_html() -> str:
       document.getElementById('sessionFeedback').value = session.session_feedback || '';
       document.getElementById('sessionFeedbackStatus').textContent =
         session.session_feedback ? 'Session feedback saved.' : 'No session feedback saved yet.';
+    }
+
+    function clearButtonFocus() {
+      if (document.activeElement instanceof HTMLButtonElement) {
+        document.activeElement.blur();
+      }
+    }
+
+    function isEditableTarget(target) {
+      return target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement || target.isContentEditable;
     }
 
     async function label(decision) {
@@ -597,6 +601,7 @@ def _review_html() -> str:
         index += 1;
         render();
       }
+      clearButtonFocus();
     }
 
     async function saveClipFeedback() {
@@ -609,6 +614,7 @@ def _review_html() -> str:
       });
       await loadSession();
       document.getElementById('clipFeedbackStatus').textContent = 'Clip feedback saved.';
+      clearButtonFocus();
     }
 
     async function saveSessionFeedback() {
@@ -620,59 +626,39 @@ def _review_html() -> str:
       });
       await loadSession();
       document.getElementById('sessionFeedbackStatus').textContent = 'Session feedback saved.';
+      clearButtonFocus();
     }
 
     function move(delta) {
       index += delta;
       render();
+      clearButtonFocus();
     }
 
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'y') label('yes');
-      if (event.key === 'n') label('no');
-      if (event.key === 's') label('skip');
-      if (event.key === 'ArrowLeft') move(-1);
-      if (event.key === 'ArrowRight') move(1);
+      if (isEditableTarget(event.target)) {
+        return;
+      }
+      if (event.altKey || event.ctrlKey || event.metaKey) {
+        return;
+      }
+      if ((event.key === ' ' || event.code === 'Space') && event.target instanceof HTMLButtonElement) {
+        event.preventDefault();
+        return;
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        move(-1);
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        move(1);
+      }
     });
 
     loadSession();
   </script>
 </body>
 </html>"""
-
-
-def _same_source_overlap(first: Segment, second: Segment) -> float:
-    if first.source_path != second.source_path:
-        return 0.0
-    intersection = max(0.0, min(first.end, second.end) - max(first.start, second.start))
-    if intersection <= 0.0:
-        return 0.0
-    return intersection / max(min(first.duration, second.duration), 1e-6)
-
-
-def _uncertainty_scores(candidates: List[Segment]) -> Dict[str, float]:
-    if not candidates:
-        return {}
-    scores = [candidate.score for candidate in candidates]
-    score_min = min(scores)
-    score_max = max(scores)
-    midpoint = (score_min + score_max) / 2.0
-    spread = max(score_max - score_min, 1e-6)
-
-    uncertainty: Dict[str, float] = {}
-    for candidate in candidates:
-        centered = 1.0 - min(abs(candidate.score - midpoint) / (spread / 2.0), 1.0)
-        generic_bonus = 0.35 if "Generic" in candidate.note else 0.0
-        fight_bonus = 0.22 if candidate.label == "fight" else 0.0
-        silly_bonus = 0.08 if candidate.label == "silly" else 0.0
-        edge_penalty = 0.18 if candidate.start <= 0.3 else 0.0
-        uncertainty[_segment_key(candidate)] = centered + generic_bonus + fight_bonus + silly_bonus - edge_penalty
-    return uncertainty
-
-
-def _segment_key(segment: Segment) -> str:
-    return f"{segment.source_path}|{segment.start:.3f}|{segment.end:.3f}|{segment.label}"
-
-
 if __name__ == "__main__":
     raise SystemExit(main())
