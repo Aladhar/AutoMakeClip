@@ -210,6 +210,31 @@ def apply_memory_to_candidates(
             else:
                 notes.append("Memory-downranked from a matching rejected clip.")
 
+        # If a direct review decision overlaps this candidate, surface a
+        # review marker in the note so selection tiers respect explicit UI
+        # decisions. This lets UI approvals/rejections override the default
+        # Eklipse-style tiering.
+        for entry in direct_entries:
+            if str(entry.get("source_key") or "") != _source_key(candidate.source_path):
+                continue
+            try:
+                overlap = _overlap_ratio(float(candidate.start), float(candidate.end), float(entry.get("start")), float(entry.get("end")))
+            except (TypeError, ValueError):
+                continue
+            if overlap <= 0.55:
+                continue
+            decision = str(entry.get("decision") or "")
+            if decision == "yes":
+                # Mark as review-approved so candidate_tier will prefer it.
+                if not any("review-approved" in n.lower() for n in notes):
+                    notes.insert(0, "Review-approved clip.")
+                break
+            elif decision == "no":
+                # Mark as review-rejected so candidate_tier can deprioritize it.
+                if not any("review-rejected" in n.lower() for n in notes):
+                    notes.insert(0, "Review-rejected clip.")
+                break
+
         feedback_delta = _feedback_score_delta(candidate, stats, global_feedback)
         if abs(feedback_delta) >= 0.01:
             score += max(abs(score), 1.0) * feedback_delta

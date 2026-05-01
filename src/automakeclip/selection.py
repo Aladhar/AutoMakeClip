@@ -137,6 +137,8 @@ def candidate_priority(segment: Segment, source_max_scores: Dict[str, float]) ->
 
 def candidate_tier(segment: Segment) -> int:
     note = (segment.note or "").lower()
+    if "review-rejected" in note:
+        return -1
     if "review-approved" in note:
         return 7
     if "steelseries multi-kill sequence" in note:
