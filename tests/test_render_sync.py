@@ -1,7 +1,8 @@
 import unittest
 from pathlib import Path
 
-from automakeclip.render import compute_music_start_offset
+from automakeclip.config import RenderConfig
+from automakeclip.render import _build_music_mix_filter, compute_music_start_offset
 from automakeclip.types import MontagePlan, MusicTrack, Segment
 
 
@@ -50,6 +51,18 @@ class RenderSyncTests(unittest.TestCase):
         offset = compute_music_start_offset(plan, intro_seconds=2.4, montage_duration=20.0)
 
         self.assertAlmostEqual(offset, 12.0, places=1)
+
+    def test_music_mix_filter_ducks_game_under_music(self) -> None:
+        filter_complex = _build_music_mix_filter(
+            config=RenderConfig(),
+            music_start_offset=12.0,
+            music_end=52.0,
+            fade_out_start=38.0,
+        )
+
+        self.assertIn("[game][music]sidechaincompress", filter_complex)
+        self.assertIn("weights=0.85 1.0", filter_complex)
+        self.assertIn("volume=0.95", filter_complex)
 
 
 if __name__ == "__main__":

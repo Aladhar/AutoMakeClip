@@ -271,12 +271,11 @@ def _mix_music(stitched_path: Path, plan: MontagePlan, output_path: Path, config
     music_start_offset = compute_music_start_offset(plan, intro_seconds=intro_seconds, montage_duration=montage_duration)
     music_end = music_start_offset + montage_duration + 0.25
 
-    filter_complex = (
-        f"[0:a]volume={config.game_audio_gain},aresample=48000[game];"
-        f"[1:a]atrim=start={music_start_offset:.3f}:end={music_end:.3f},asetpts=PTS-STARTPTS,volume={config.music_gain},"
-        f"afade=t=in:st=0:d=0.8,afade=t=out:st={fade_out_start:.3f}:d=1.1,aresample=48000[music];"
-        "[music][game]sidechaincompress=threshold=0.04:ratio=8:attack=10:release=220:makeup=1.5[ducked];"
-        "[game][ducked]amix=inputs=2:weights=1 1:normalize=0[a]"
+    filter_complex = _build_music_mix_filter(
+        config=config,
+        music_start_offset=music_start_offset,
+        music_end=music_end,
+        fade_out_start=fade_out_start,
     )
 
     run_ffmpeg(
@@ -305,6 +304,21 @@ def _mix_music(stitched_path: Path, plan: MontagePlan, output_path: Path, config
             config.audio_bitrate,
             str(output_path),
         ]
+    )
+
+
+def _build_music_mix_filter(
+    config: RenderConfig,
+    music_start_offset: float,
+    music_end: float,
+    fade_out_start: float,
+) -> str:
+    return (
+        f"[0:a]volume={config.game_audio_gain},highpass=f=120,aresample=48000[game];"
+        f"[1:a]atrim=start={music_start_offset:.3f}:end={music_end:.3f},asetpts=PTS-STARTPTS,volume={config.music_gain},"
+        f"afade=t=in:st=0:d=0.6,afade=t=out:st={fade_out_start:.3f}:d=1.1,aresample=48000[music];"
+        "[game][music]sidechaincompress=threshold=0.08:ratio=10:attack=15:release=250:makeup=1.0[ducked_game];"
+        "[ducked_game][music]amix=inputs=2:weights=0.85 1.0:normalize=0,alimiter=limit=0.95[a]"
     )
 
 

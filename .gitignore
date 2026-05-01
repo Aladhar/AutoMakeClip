@@ -11,3 +11,9 @@ latest-output/
 .automakeclip_downloads/
 review_sessions/
 tmp/
+music_library/tracks.json
+music_library/*.mp3
+music_library/*.wav
+music_library/*.m4a
+music_library/*.aac
+music_library/*.flac

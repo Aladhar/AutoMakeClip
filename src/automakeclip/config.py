@@ -39,12 +39,12 @@ class AnalysisConfig:
 
 @dataclass
 class MusicConfig:
-    source: str = "auto"
+    source: str = "library"
     preferred_licenses: List[str] = field(default_factory=lambda: ["by"])
     query_limit: int = 24
     download_timeout_seconds: int = 30
     library_manifest: str = "music_library/tracks.json"
-    allow_generated_fallback: bool = True
+    allow_generated_fallback: bool = False
 
 
 @dataclass
@@ -57,8 +57,8 @@ class RenderConfig:
     crf: int = 18
     preset: str = "medium"
     audio_bitrate: str = "192k"
-    music_gain: float = 0.20
-    game_audio_gain: float = 1.10
+    music_gain: float = 0.95
+    game_audio_gain: float = 0.38
     intro_title: str = "OVERWATCH HIGHLIGHTS"
     intro_subtitle: str = "big plays, chaos, and one goofy moment"
     beat_snap_tolerance_seconds: float = 0.40

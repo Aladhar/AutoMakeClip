@@ -27,6 +27,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--subtitle", default="big plays, chaos, and one goofy moment", help="Intro subtitle text.")
     parser.add_argument("--target-seconds", type=float, default=42.0, help="Target runtime for the final montage.")
     parser.add_argument("--no-music", action="store_true", help="Skip automatic music selection and mixing.")
+    parser.add_argument(
+        "--music-source",
+        choices=("library", "auto", "ccmixter", "generated"),
+        default=None,
+        help="Choose where soundtrack music comes from. Defaults to licensed local library tracks.",
+    )
+    parser.add_argument("--music-manifest", default=None, help="Path to the local music manifest JSON.")
+    parser.add_argument(
+        "--allow-generated-fallback",
+        action="store_true",
+        help="Only use this if you want the synthetic backup track when no real song is available.",
+    )
+    parser.add_argument("--music-gain", type=float, default=None, help="Override soundtrack loudness mix gain.")
+    parser.add_argument("--game-audio-gain", type=float, default=None, help="Override gameplay audio mix gain.")
     parser.add_argument("--no-silly", action="store_true", help="Skip the comedy/chaos bridge segment.")
     parser.add_argument("--no-cache", action="store_true", help="Disable per-video analysis cache reads and writes.")
     parser.add_argument("--keep-temp", action="store_true", help="Keep intermediate rendered files.")
@@ -43,6 +57,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     config = AppConfig()
+    if args.music_source is not None:
+        config.music.source = args.music_source
+    if args.music_manifest is not None:
+        config.music.library_manifest = args.music_manifest
+    if args.allow_generated_fallback:
+        config.music.allow_generated_fallback = True
+    if args.music_gain is not None:
+        config.render.music_gain = args.music_gain
+    if args.game_audio_gain is not None:
+        config.render.game_audio_gain = args.game_audio_gain
     try:
         from .analysis import analyze_gameplay, infer_montage_profile, pick_segments
         from .cache import load_analysis_cache, store_analysis_cache
@@ -149,6 +173,10 @@ def main() -> int:
             music_dir = output_path.parent / "music_cache"
             print(f"Selecting music for mood={plan.mood} bpm={plan.target_bpm}", file=sys.stderr)
             plan.music = select_music_track(plan.mood, plan.target_bpm, music_dir, config.music)
+            print(
+                f"Using music: {plan.music.title} - {plan.music.artist} [{plan.music.source_kind or 'unknown'}]",
+                file=sys.stderr,
+            )
 
         if args.dry_run:
             output_path.parent.mkdir(parents=True, exist_ok=True)

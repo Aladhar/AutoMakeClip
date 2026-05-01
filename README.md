@@ -6,7 +6,7 @@ AutoMakeClip turns a long Overwatch gameplay recording into a tighter highlight 
 - boosts kill-feed and action-heavy sections
 - prefers embedded SteelSeries / GameSense kill events when they exist
 - inserts a short stylized intro
-- prefers real licensed music from a local library manifest, then open-use tracks
+- prefers real licensed music you supply locally, with generated fallback only when you explicitly allow it
 - aligns clip lengths toward the chosen track's beat grid
 - exports a higher-fidelity final montage MP4 plus a credits file for the music
 
@@ -114,10 +114,19 @@ The tool also keeps a per-video analysis cache in `.automakeclip_cache/` so repe
 The music picker now works in this order:
 
 - local library manifest in `music_library/tracks.json` for real songs you already downloaded or licensed
-- public ccMixter catalog as an open-use fallback
-- generated fallback only if no real track can be used
+- optional public ccMixter catalog only if you explicitly switch `--music-source auto` or `--music-source ccmixter`
+- generated fallback only if you explicitly pass `--allow-generated-fallback`
 
 The local-library route is the safest way to use actual songs in a repeatable workflow. A starter schema lives at `music_library/tracks.example.json`.
+
+If you want actual trending songs instead of generated music:
+
+- license them through YouTube Creator Music if your channel is eligible
+- or use tracks from YouTube Audio Library
+- download them yourself
+- list them in `music_library/tracks.json`
+
+That keeps the workflow legal and repeatable without pretending random Spotify or YouTube uploads are safe to use.
 
 The picker aims for:
 
@@ -128,6 +137,25 @@ The picker aims for:
 The exact track is chosen automatically from the reel's detected pace.
 
 For YouTube-safe publishing, prefer tracks you downloaded from YouTube Audio Library or music you separately licensed through YouTube Creator Music and list them in the manifest with their local file paths.
+
+Example:
+
+```bash
+automakeclip \
+  --input "/path/to/Videos" \
+  --output latest-output/final_clip.mp4 \
+  --music-source library \
+  --music-manifest music_library/tracks.json
+```
+
+If you deliberately want the old synthetic fallback:
+
+```bash
+automakeclip \
+  --input "/path/to/Videos" \
+  --output latest-output/final_clip.mp4 \
+  --allow-generated-fallback
+```
 
 If you care about drop-sync specifically, add `drop_times` to your `music_library/tracks.json` entries. Those should be the song timestamps where the main drop or major impact moments happen, and the renderer will shift the song so those moments line up with the strongest gameplay beats.
 

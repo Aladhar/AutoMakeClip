@@ -5,7 +5,7 @@ import wave
 from pathlib import Path
 
 from automakeclip.config import MusicConfig
-from automakeclip.music import select_music_track
+from automakeclip.music import resolve_music_manifest_path, select_music_track
 
 
 class MusicTests(unittest.TestCase):
@@ -52,6 +52,41 @@ class MusicTests(unittest.TestCase):
             self.assertEqual(track.source_kind, "youtube_audio_library")
             self.assertEqual(track.local_path, track_path)
             self.assertEqual(track.drop_times, [18.0, 25.5])
+
+    def test_bad_manifest_falls_back_only_when_explicitly_allowed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            manifest_path = root / "tracks.json"
+            manifest_path.write_text("{not valid json", encoding="utf-8")
+
+            track = select_music_track(
+                mood="balanced",
+                target_bpm=138.0,
+                output_dir=root / "output_music",
+                config=MusicConfig(
+                    source="library",
+                    library_manifest=str(manifest_path),
+                    allow_generated_fallback=True,
+                ),
+            )
+
+            self.assertEqual(track.source_kind, "generated")
+
+    def test_resolve_music_manifest_path_prefers_existing_cwd_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            manifest_path = root / "tracks.json"
+            manifest_path.write_text("[]", encoding="utf-8")
+            previous_cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(root)
+                resolved = resolve_music_manifest_path("tracks.json")
+            finally:
+                os.chdir(previous_cwd)
+
+            self.assertEqual(resolved, manifest_path.resolve())
 
     def _write_silent_wav(self, path: Path) -> None:
         with wave.open(str(path), "wb") as handle:

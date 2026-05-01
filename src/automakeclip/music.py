@@ -15,6 +15,8 @@ import numpy as np
 from .config import MusicConfig
 from .types import MusicTrack
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 class MusicSelectionError(RuntimeError):
     """Raised when a music track cannot be selected."""
@@ -23,9 +25,14 @@ class MusicSelectionError(RuntimeError):
 def select_music_track(mood: str, target_bpm: float, output_dir: Path, config: MusicConfig) -> MusicTrack:
     output_dir.mkdir(parents=True, exist_ok=True)
     sources = _resolved_sources(config.source)
+    library_error: Optional[MusicSelectionError] = None
 
     if "library" in sources:
-        library_tracks = _load_local_library_tracks(Path(config.library_manifest).expanduser().resolve())
+        try:
+            library_tracks = _load_local_library_tracks(resolve_music_manifest_path(config.library_manifest))
+        except MusicSelectionError as error:
+            library_tracks = []
+            library_error = error
         if library_tracks:
             return max(library_tracks, key=lambda track: _local_track_score(track, mood, target_bpm))
 
@@ -48,7 +55,28 @@ def select_music_track(mood: str, target_bpm: float, output_dir: Path, config: M
 
     if config.allow_generated_fallback or "generated" in sources:
         return _synthesize_fallback_track(mood, target_bpm, output_dir)
-    raise MusicSelectionError("No usable music track was found. Add local licensed tracks or enable generated fallback.")
+    if library_error is not None:
+        raise library_error
+    raise MusicSelectionError(
+        "No usable real music track was found. Add licensed songs to music_library/tracks.json "
+        "or pass --allow-generated-fallback if you want the synthetic backup."
+    )
+
+
+def resolve_music_manifest_path(manifest_value: str | Path) -> Path:
+    manifest_path = Path(manifest_value).expanduser()
+    if manifest_path.is_absolute():
+        return manifest_path
+
+    cwd_candidate = (Path.cwd() / manifest_path).resolve()
+    if cwd_candidate.exists():
+        return cwd_candidate
+
+    project_candidate = (PROJECT_ROOT / manifest_path).resolve()
+    if project_candidate.exists():
+        return project_candidate
+
+    return cwd_candidate
 
 
 def _fetch_ccmixter_tracks(tags: List[str], config: MusicConfig) -> List[MusicTrack]:
