@@ -85,6 +85,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--keep-temp", action="store_true", help="Keep intermediate rendered files.")
     parser.add_argument("--dry-run", action="store_true", help="Analyze and write the plan without rendering.")
     parser.add_argument(
+        "--transition-style",
+        choices=("none", "fire"),
+        default=None,
+        help="Enable transitions between clips; 'fire' uses an overlay asset if present.",
+    )
+    parser.add_argument(
+        "--transition-duration",
+        type=float,
+        default=None,
+        help="Override the default transition duration in seconds.",
+    )
+    parser.add_argument(
         "--youtube-playlist-limit",
         type=int,
         default=24,
@@ -109,6 +121,10 @@ def main() -> int:
         config.render.music_gain = args.music_gain
     if args.game_audio_gain is not None:
         config.render.game_audio_gain = args.game_audio_gain
+    if args.transition_style is not None:
+        config.render.transition_style = args.transition_style
+    if args.transition_duration is not None:
+        config.render.transition_duration = args.transition_duration
     try:
         from .analysis import analyze_gameplay, infer_montage_profile
         from .cache import load_analysis_cache, load_cached_analysis_entries, store_analysis_cache
