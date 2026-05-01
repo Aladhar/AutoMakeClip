@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from .config import AnalysisConfig
 from .types import AnalysisTimeline, VideoMetadata
@@ -71,9 +71,62 @@ def store_analysis_cache(
     return cache_path
 
 
+def load_cached_analysis_entries(cache_dir: Path, config: AnalysisConfig) -> List[Tuple[Path, VideoMetadata, AnalysisTimeline]]:
+    if not cache_dir.exists():
+        return []
+
+    entries: List[Tuple[Path, VideoMetadata, AnalysisTimeline]] = []
+    for cache_path in sorted(cache_dir.glob("*.json")):
+        entry = _load_cache_payload(cache_path, config)
+        if entry is not None:
+            entries.append(entry)
+    entries.sort(key=lambda item: str(item[0]).lower())
+    return entries
+
+
 def _cache_path(cache_dir: Path, source_path: Path) -> Path:
     digest = hashlib.sha1(str(source_path).encode("utf-8")).hexdigest()
     return cache_dir / f"{digest}.json"
+
+
+def _load_cache_payload(cache_path: Path, config: AnalysisConfig) -> Optional[Tuple[Path, VideoMetadata, AnalysisTimeline]]:
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    source_value = payload.get("source_path")
+    if not isinstance(source_value, str):
+        return None
+    source_path = Path(source_value)
+    if not source_path.exists():
+        return None
+
+    try:
+        stat = source_path.stat()
+    except OSError:
+        return None
+
+    if payload.get("cache_version") != CACHE_VERSION:
+        return None
+    if payload.get("file_size") != stat.st_size:
+        return None
+    if payload.get("file_mtime_ns") != stat.st_mtime_ns:
+        return None
+    if payload.get("analysis_config") != _normalized_config(config):
+        return None
+
+    metadata_payload = payload.get("metadata")
+    timeline_payload = payload.get("timeline")
+    if not isinstance(metadata_payload, dict) or not isinstance(timeline_payload, dict):
+        return None
+
+    try:
+        metadata = VideoMetadata(**metadata_payload)
+        timeline = AnalysisTimeline(**timeline_payload)
+    except TypeError:
+        return None
+    return source_path, metadata, timeline
 
 
 def _normalized_config(config: AnalysisConfig):

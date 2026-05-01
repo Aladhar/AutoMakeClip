@@ -13,6 +13,9 @@ class InputResolutionError(RuntimeError):
     """Raised when an input path or URL cannot be resolved."""
 
 
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm"}
+
+
 @dataclass
 class YoutubeEntry:
     title: str
@@ -33,8 +36,8 @@ def resolve_inputs(raw_inputs: List[List[str]], download_root: Path, youtube_pla
 
             path = Path(value).expanduser().resolve()
             if path.is_dir():
-                for child in sorted(path.iterdir()):
-                    if child.is_file() and child.suffix.lower() == ".mp4" and child not in seen:
+                for child in _iter_local_video_files(path):
+                    if child not in seen:
                         resolved.append(child)
                         seen.add(child)
                 continue
@@ -42,6 +45,17 @@ def resolve_inputs(raw_inputs: List[List[str]], download_root: Path, youtube_pla
                 resolved.append(path)
                 seen.add(path)
     return resolved
+
+
+def _iter_local_video_files(path: Path) -> List[Path]:
+    return sorted(
+        (
+            child.resolve()
+            for child in path.rglob("*")
+            if child.is_file() and child.suffix.lower() in VIDEO_EXTENSIONS
+        ),
+        key=lambda child: str(child).lower(),
+    )
 
 
 def _resolve_url_input(url: str, download_root: Path, youtube_playlist_limit: int) -> List[Path]:

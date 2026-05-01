@@ -39,7 +39,7 @@ class AnalysisConfig:
 
 @dataclass
 class MusicConfig:
-    source: str = "library"
+    source: str = "youtube"
     preferred_licenses: List[str] = field(default_factory=lambda: ["by"])
     query_limit: int = 24
     download_timeout_seconds: int = 30

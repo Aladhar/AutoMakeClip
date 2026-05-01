@@ -1,17 +1,17 @@
 [
   {
-    "title": "Heat Check",
-    "artist": "Example Creator Track",
-    "license_name": "YouTube Audio Library",
-    "page_url": "https://youtube.com/audiolibrary",
-    "download_url": "local://library",
-    "local_path": "./heatcheck.wav",
+    "title": "Stream Playlist",
+    "artist": "YouTube",
+    "license_name": "User-supplied YouTube audio - verify rights before publishing",
+    "page_url": "https://www.youtube.com/watch?v=VIDEO_ID&list=PLAYLIST_ID",
+    "download_url": "https://www.youtube.com/watch?v=VIDEO_ID&list=PLAYLIST_ID",
+    "local_path": "",
     "bpm": 138,
-    "tags": ["electronic", "house", "gaming"],
-    "source_kind": "youtube_audio_library",
-    "youtube_safe": true,
+    "tags": ["electronic", "stream", "gaming"],
+    "source_kind": "youtube_playlist",
+    "youtube_safe": false,
     "trend_score": 8.5,
     "drop_times": [17.6, 25.9, 34.2],
-    "usage_note": "Downloaded from YouTube Audio Library. Add attribution if required by the track."
+    "usage_note": "The picker downloads the first available playlist audio item with yt-dlp. Use only audio you have rights to publish."
   }
 ]

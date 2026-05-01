@@ -1,11 +1,18 @@
 import unittest
 
-from automakeclip.analysis import extract_borderline_review_segments, extract_candidate_segments
+import numpy as np
+
+from automakeclip.analysis import _smooth, extract_borderline_review_segments, extract_candidate_segments
 from automakeclip.config import AnalysisConfig
 from automakeclip.types import AnalysisTimeline, VideoMetadata
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_smoothing_preserves_short_signal_length(self) -> None:
+        values = np.array([0.2, 0.8], dtype=np.float32)
+        smoothed = _smooth(values, window_size=5)
+        self.assertEqual(smoothed.shape, values.shape)
+
     def test_prefers_steelseries_kill_windows(self) -> None:
         timeline = AnalysisTimeline(
             times=[0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0],
@@ -43,6 +50,105 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("SteelSeries", best.note)
         self.assertAlmostEqual(best.highlight_time or 0.0, 14.5)
         self.assertFalse(any("Generic" in candidate.note for candidate in candidates))
+
+    def test_event_segments_keep_highlight_inside_clamped_window(self) -> None:
+        timeline = AnalysisTimeline(
+            times=[float(index) for index in range(70)],
+            visual_motion=[0.1] * 70,
+            killfeed_motion=[0.2] * 70,
+            hud_motion=[0.1] * 70,
+            center_motion=[0.1] * 70,
+            audio_rms=[0.1] * 70,
+            audio_flux=[0.1] * 70,
+            scene_change=[0.1] * 70,
+            gameplay_confidence=[0.5] * 70,
+            scores=[0.2] * 70,
+            duration=70.0,
+        )
+        metadata = VideoMetadata(
+            duration=70.0,
+            width=1920,
+            height=1080,
+            fps=60.0,
+            kill_events=[
+                {"type": "KILL", "timestamp": 44.0, "name": "ELIMINATION"},
+                {"type": "KILL", "timestamp": 49.0, "name": "DOUBLE ELIMINATION"},
+                {"type": "KILL", "timestamp": 54.5, "name": "TRIPLE ELIMINATION"},
+            ],
+        )
+
+        candidates = extract_candidate_segments(timeline, metadata, AnalysisConfig())
+        event_candidate = max(candidates, key=lambda item: item.score)
+
+        self.assertLessEqual(event_candidate.start, event_candidate.highlight_time or 0.0)
+        self.assertGreaterEqual(event_candidate.end, event_candidate.highlight_time or 0.0)
+        self.assertLessEqual(event_candidate.duration, AnalysisConfig().max_segment_seconds)
+
+    def test_deprioritizes_repetitive_high_density_kill_streams(self) -> None:
+        timeline = AnalysisTimeline(
+            times=[float(index) for index in range(61)],
+            visual_motion=[0.4] * 61,
+            killfeed_motion=[0.8] * 61,
+            hud_motion=[0.5] * 61,
+            center_motion=[0.5] * 61,
+            audio_rms=[0.3] * 61,
+            audio_flux=[0.3] * 61,
+            scene_change=[0.2] * 61,
+            gameplay_confidence=[0.8] * 61,
+            scores=[1.0] * 61,
+            duration=60.0,
+        )
+        metadata = VideoMetadata(
+            duration=60.0,
+            width=2560,
+            height=1440,
+            fps=60.0,
+            kill_events=[
+                {"type": "KILL", "timestamp": float(index * 2), "name": "ELIMINATION"}
+                for index in range(16)
+            ],
+            source_game="Overwatch",
+            trigger_name="multikill",
+        )
+
+        candidates = extract_candidate_segments(timeline, metadata, AnalysisConfig())
+
+        event_candidates = [candidate for candidate in candidates if "high-density kill stream" in candidate.note]
+        self.assertTrue(event_candidates)
+        self.assertTrue(all(candidate.label == "fight" for candidate in event_candidates))
+        self.assertFalse(any("SteelSeries multi-kill sequence" in candidate.note for candidate in event_candidates))
+
+    def test_deprioritizes_short_artificial_kill_bursts(self) -> None:
+        timeline = AnalysisTimeline(
+            times=[float(index) for index in range(61)],
+            visual_motion=[0.4] * 61,
+            killfeed_motion=[0.8] * 61,
+            hud_motion=[0.5] * 61,
+            center_motion=[0.5] * 61,
+            audio_rms=[0.3] * 61,
+            audio_flux=[0.3] * 61,
+            scene_change=[0.2] * 61,
+            gameplay_confidence=[0.8] * 61,
+            scores=[1.0] * 61,
+            duration=60.0,
+        )
+        metadata = VideoMetadata(
+            duration=60.0,
+            width=2560,
+            height=1440,
+            fps=60.0,
+            kill_events=[
+                {"type": "KILL", "timestamp": 36.0 + float(index) * 1.6, "name": "DOUBLE ELIMINATION"}
+                for index in range(10)
+            ],
+            source_game="Overwatch",
+            trigger_name="multikill",
+        )
+
+        candidates = extract_candidate_segments(timeline, metadata, AnalysisConfig())
+
+        self.assertTrue(any("high-density kill stream" in candidate.note for candidate in candidates))
+        self.assertFalse(any("SteelSeries multi-kill sequence" in candidate.note for candidate in candidates))
 
     def test_generates_generic_peak_candidates_without_metadata(self) -> None:
         timeline = AnalysisTimeline(

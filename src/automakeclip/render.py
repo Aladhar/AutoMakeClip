@@ -45,6 +45,8 @@ def snap_segments_to_beats(segments: List[Segment], bpm: float, duration_by_sour
 
 
 def render_montage(plan: MontagePlan, analysis_config: AnalysisConfig, render_config: RenderConfig, keep_temp: bool) -> Path:
+    from .latest_render import record_latest_render
+
     output_path = plan.output_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -118,6 +120,7 @@ def render_montage(plan: MontagePlan, analysis_config: AnalysisConfig, render_co
                 target.write_bytes(item.read_bytes())
 
     _write_sidecars(plan)
+    record_latest_render(plan)
     return output_path
 
 

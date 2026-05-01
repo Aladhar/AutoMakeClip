@@ -4,23 +4,62 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 from .config import AppConfig
 from .inputs import InputResolutionError, looks_like_non_gameplay_source, resolve_inputs
+from .memory import apply_memory_to_candidates
 from .selection import select_global_segments, sequence_segments
 from .types import Segment
 from .types import MontagePlan
+
+
+def _add_candidate_segments(
+    candidate_segments: List[Segment],
+    source_durations: Dict[str, float],
+    input_path: Path,
+    metadata,
+    timeline,
+    config: AppConfig,
+    target_seconds: float,
+    include_silly: bool,
+) -> None:
+    from .analysis import pick_segments
+
+    file_segments, _ = pick_segments(
+        timeline,
+        metadata,
+        config.analysis,
+        target_seconds=target_seconds,
+        include_silly=include_silly,
+    )
+    source_durations[str(input_path)] = metadata.duration
+    for segment in file_segments:
+        candidate_segments.append(
+            Segment(
+                start=segment.start,
+                end=segment.end,
+                score=segment.score,
+                label=segment.label,
+                note=segment.note,
+                source_path=str(input_path),
+                highlight_time=segment.highlight_time,
+            )
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Turn a long Overwatch MP4 into a compact highlight montage.")
     parser.add_argument(
         "--input",
-        required=True,
         nargs="+",
         action="append",
         help="One or more source gameplay MP4 files or folders containing MP4 files.",
+    )
+    parser.add_argument(
+        "--from-cache",
+        action="store_true",
+        help="Build the candidate pool from valid .automakeclip_cache entries instead of rescanning input videos.",
     )
     parser.add_argument("--output", required=True, help="Output highlight MP4.")
     parser.add_argument("--title", default="OVERWATCH HIGHLIGHTS", help="Intro title text.")
@@ -29,9 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-music", action="store_true", help="Skip automatic music selection and mixing.")
     parser.add_argument(
         "--music-source",
-        choices=("library", "auto", "ccmixter", "generated"),
+        choices=("youtube", "spotify", "library", "auto", "ccmixter", "generated"),
         default=None,
-        help="Choose where soundtrack music comes from. Defaults to licensed local library tracks.",
+        help="Choose where soundtrack music comes from. Defaults to YouTube playlist entries in the music manifest.",
     )
     parser.add_argument("--music-manifest", default=None, help="Path to the local music manifest JSON.")
     parser.add_argument(
@@ -55,7 +94,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
+    if not args.from_cache and not args.input:
+        parser.error("--input is required unless --from-cache is used.")
     config = AppConfig()
     if args.music_source is not None:
         config.music.source = args.music_source
@@ -68,8 +110,8 @@ def main() -> int:
     if args.game_audio_gain is not None:
         config.render.game_audio_gain = args.game_audio_gain
     try:
-        from .analysis import analyze_gameplay, infer_montage_profile, pick_segments
-        from .cache import load_analysis_cache, store_analysis_cache
+        from .analysis import analyze_gameplay, infer_montage_profile
+        from .cache import load_analysis_cache, load_cached_analysis_entries, store_analysis_cache
         from .ffmpeg import FFmpegError, ensure_ffmpeg, probe_video
         from .music import MusicSelectionError, select_music_track
         from .render import render_montage, snap_segments_to_beats
@@ -80,11 +122,13 @@ def main() -> int:
         )
         return 2
 
-    input_paths = resolve_inputs(
-        args.input,
-        download_root=Path.cwd() / ".automakeclip_downloads",
-        youtube_playlist_limit=max(1, args.youtube_playlist_limit),
-    )
+    input_paths = []
+    if not args.from_cache:
+        input_paths = resolve_inputs(
+            args.input,
+            download_root=Path.cwd() / ".automakeclip_downloads",
+            youtube_playlist_limit=max(1, args.youtube_playlist_limit),
+        )
     output_path = Path(args.output).expanduser().resolve()
     missing_paths = [path for path in input_paths if not path.exists()]
     if missing_paths:
@@ -95,51 +139,64 @@ def main() -> int:
         ensure_ffmpeg()
         candidate_segments: List[Segment] = []
         source_durations = {}
-        total_inputs = len(input_paths)
         cache_dir = Path.cwd() / config.cache.directory_name
         use_cache = config.cache.enabled and not args.no_cache
 
-        for index, input_path in enumerate(input_paths, start=1):
-            prefix = f"[{index}/{total_inputs}]"
-            if looks_like_non_gameplay_source(input_path):
-                print(f"{prefix} skip non-gameplay source {input_path.name}", file=sys.stderr)
-                continue
-            cached = load_analysis_cache(cache_dir, input_path, config.analysis) if use_cache else None
-            if cached is not None:
-                metadata, timeline = cached
-                print(f"{prefix} cache hit {input_path.name}", file=sys.stderr)
-            else:
-                print(f"{prefix} cache miss {input_path.name}", file=sys.stderr)
-                metadata = probe_video(input_path)
-                timeline = analyze_gameplay(input_path, metadata, config.analysis)
-                if use_cache:
-                    store_analysis_cache(cache_dir, input_path, config.analysis, metadata, timeline)
-            file_segments, _ = pick_segments(
-                timeline,
-                metadata,
-                config.analysis,
-                target_seconds=args.target_seconds,
-                include_silly=not args.no_silly,
-            )
-            source_durations[str(input_path)] = metadata.duration
-            for segment in file_segments:
-                candidate_segments.append(
-                    Segment(
-                        start=segment.start,
-                        end=segment.end,
-                        score=segment.score,
-                        label=segment.label,
-                        note=segment.note,
-                        source_path=str(input_path),
-                        highlight_time=segment.highlight_time,
-                    )
+        if args.from_cache:
+            cached_entries = [
+                entry
+                for entry in load_cached_analysis_entries(cache_dir, config.analysis)
+                if not looks_like_non_gameplay_source(entry[0])
+            ]
+            input_paths = [source_path for source_path, _, _ in cached_entries]
+            if not cached_entries:
+                raise RuntimeError("No valid analysis cache entries were found.")
+            for index, (input_path, metadata, timeline) in enumerate(cached_entries, start=1):
+                print(f"[{index}/{len(cached_entries)}] cache plan {input_path.name}", file=sys.stderr)
+                _add_candidate_segments(
+                    candidate_segments,
+                    source_durations,
+                    input_path,
+                    metadata,
+                    timeline,
+                    config,
+                    target_seconds=args.target_seconds,
+                    include_silly=not args.no_silly,
+                )
+        else:
+            total_inputs = len(input_paths)
+            for index, input_path in enumerate(input_paths, start=1):
+                prefix = f"[{index}/{total_inputs}]"
+                if looks_like_non_gameplay_source(input_path):
+                    print(f"{prefix} skip non-gameplay source {input_path.name}", file=sys.stderr)
+                    continue
+                cached = load_analysis_cache(cache_dir, input_path, config.analysis) if use_cache else None
+                if cached is not None:
+                    metadata, timeline = cached
+                    print(f"{prefix} cache hit {input_path.name}", file=sys.stderr)
+                else:
+                    print(f"{prefix} cache miss {input_path.name}", file=sys.stderr)
+                    metadata = probe_video(input_path)
+                    timeline = analyze_gameplay(input_path, metadata, config.analysis)
+                    if use_cache:
+                        store_analysis_cache(cache_dir, input_path, config.analysis, metadata, timeline)
+                _add_candidate_segments(
+                    candidate_segments,
+                    source_durations,
+                    input_path,
+                    metadata,
+                    timeline,
+                    config,
+                    target_seconds=args.target_seconds,
+                    include_silly=not args.no_silly,
                 )
 
-        print(f"Analyzed {total_inputs} inputs and found {len(candidate_segments)} candidate segments.", file=sys.stderr)
+        print(f"Analyzed {len(input_paths)} inputs and found {len(candidate_segments)} candidate segments.", file=sys.stderr)
 
         if not candidate_segments:
             raise RuntimeError("No highlight segments were detected. Try lowering the threshold or using a more action-heavy take.")
 
+        candidate_segments = apply_memory_to_candidates(candidate_segments, source_durations)
         selected = select_global_segments(
             candidate_segments,
             target_seconds=args.target_seconds,

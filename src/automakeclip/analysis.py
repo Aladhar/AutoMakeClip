@@ -10,6 +10,12 @@ from .ffmpeg import extract_audio_samples, iter_analysis_frames
 from .types import AnalysisTimeline, Segment, VideoMetadata
 
 
+REPETITIVE_EVENT_MIN_COUNT = 14
+REPETITIVE_EVENT_RATE_PER_MINUTE = 15.0
+REPETITIVE_EVENT_BURST_COUNT = 10
+REPETITIVE_EVENT_BURST_SECONDS = 22.0
+
+
 @dataclass
 class MontageProfile:
     mood: str
@@ -407,13 +413,14 @@ def _extract_event_segments(timeline: AnalysisTimeline, metadata: VideoMetadata,
     if current:
         clusters.append(current)
 
+    repetitive_event_stream = _has_repetitive_event_stream(metadata.kill_events, metadata.duration)
     segments: List[Segment] = []
     for cluster in clusters:
         first_time = float(cluster[0]["timestamp"])
         last_time = float(cluster[-1]["timestamp"])
         start = max(0.0, first_time - config.event_pre_roll_seconds)
         end = min(metadata.duration, last_time + config.event_post_roll_seconds)
-        start, end = _clamp_segment(start, end, metadata.duration, config)
+        start, end = _clamp_event_segment(start, end, anchor=last_time, duration=metadata.duration, config=config)
         if end - start < config.min_segment_seconds:
             continue
 
@@ -427,6 +434,10 @@ def _extract_event_segments(timeline: AnalysisTimeline, metadata: VideoMetadata,
         score = event_points * 1.15 + local_score * 0.65 + max(local_gameplay, 0.0) * 0.35 + max(local_killfeed, 0.0) * 0.20
         label = "highlight" if cluster_size >= 2 or event_points >= 2.2 else "fight"
         note = "SteelSeries multi-kill sequence." if label == "highlight" else "SteelSeries kill event window."
+        if repetitive_event_stream:
+            score *= 0.25
+            label = "fight"
+            note = "Deprioritized high-density kill stream; possible repeated practice/training clip."
         segments.append(Segment(start=start, end=end, score=score, label=label, note=note, highlight_time=last_time))
 
     return segments
@@ -508,6 +519,33 @@ def _event_weight(name: str) -> float:
     return 1.0
 
 
+def _has_repetitive_event_stream(kill_events: List[dict], duration: float) -> bool:
+    timestamps: List[float] = []
+    for event in kill_events:
+        if str(event.get("type") or "").upper() != "KILL":
+            continue
+        try:
+            timestamps.append(float(event.get("timestamp", 0.0)))
+        except (TypeError, ValueError):
+            continue
+
+    if len(timestamps) < REPETITIVE_EVENT_MIN_COUNT:
+        if len(timestamps) < REPETITIVE_EVENT_BURST_COUNT:
+            return False
+    events_per_minute = len(timestamps) / max(duration, 1.0) * 60.0
+    if events_per_minute >= REPETITIVE_EVENT_RATE_PER_MINUTE:
+        return True
+
+    timestamps.sort()
+    left_index = 0
+    for right_index, timestamp in enumerate(timestamps):
+        while timestamp - timestamps[left_index] > REPETITIVE_EVENT_BURST_SECONDS:
+            left_index += 1
+        if right_index - left_index + 1 >= REPETITIVE_EVENT_BURST_COUNT:
+            return True
+    return False
+
+
 def _segment_around_peak(
     peak_time: float,
     peak_score: float,
@@ -541,6 +579,34 @@ def _clamp_segment(start: float, end: float, duration: float, config: AnalysisCo
         end = min(duration, midpoint + half)
         if (end - start) > config.max_segment_seconds:
             end = min(duration, start + config.max_segment_seconds)
+    return start, end
+
+
+def _clamp_event_segment(start: float, end: float, anchor: float, duration: float, config: AnalysisConfig) -> Tuple[float, float]:
+    if (end - start) > config.max_segment_seconds:
+        target_duration = config.max_segment_seconds
+        post_roll = min(config.event_post_roll_seconds, target_duration * 0.45)
+        start = anchor - (target_duration - post_roll)
+        end = anchor + post_roll
+
+    start = max(0.0, start)
+    end = min(duration, end)
+    if end - start < config.min_segment_seconds:
+        extension = (config.min_segment_seconds - (end - start)) / 2.0
+        start = max(0.0, start - extension)
+        end = min(duration, end + extension)
+
+    if anchor < start:
+        shift = start - anchor
+        start = max(0.0, start - shift)
+        end = min(duration, end - shift)
+    elif anchor > end:
+        shift = anchor - end
+        start = max(0.0, start + shift)
+        end = min(duration, end + shift)
+
+    if (end - start) > config.max_segment_seconds:
+        end = min(duration, start + config.max_segment_seconds)
     return start, end
 
 
@@ -585,8 +651,9 @@ def _robust_normalize(values: np.ndarray) -> np.ndarray:
 
 
 def _smooth(values: np.ndarray, window_size: int) -> np.ndarray:
-    if window_size <= 1:
+    if window_size <= 1 or values.size == 0:
         return values
+    window_size = min(window_size, values.size)
     kernel = np.ones(window_size, dtype=np.float32) / window_size
     return np.convolve(values, kernel, mode="same")
 

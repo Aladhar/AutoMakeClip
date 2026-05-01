@@ -60,6 +60,7 @@ automakeclip --input take.mp4 --output reel.mp4 --no-music
 automakeclip --input "/path/to/Videos" --output reel.mp4 --no-cache
 automakeclip --input take.mp4 --output reel.mp4 --keep-temp
 automakeclip --input take.mp4 --output reel.mp4 --dry-run
+automakeclip --from-cache --output reel.mp4
 ```
 
 You can also pass YouTube URLs when `yt-dlp` is installed. If you pass a YouTube channel `/streams` page, the resolver looks for recent titles that mention `Overwatch` or `OW2`, downloads those VODs locally, and then analyzes the resulting MP4s.
@@ -80,6 +81,12 @@ If the new console script is not installed yet in your environment, run the repo
 python3 review_ui.py --input "/path/to/Videos" --samples 18
 ```
 
+If the videos have already been analyzed and are still present on disk, you can build the review session directly from the cache:
+
+```bash
+automakeclip-review --from-cache --samples 18
+```
+
 This creates a review session in `review_sessions/` and starts a local UI at `http://127.0.0.1:8765`.
 
 The review app:
@@ -87,7 +94,14 @@ The review app:
 - renders short sample clips from the current detector
 - lets you mark each one `yes`, `no`, or `skip`
 - saves your decisions to `labels.json` in the session folder
+- saves review memory to `review_sessions/review_memory.json` so future runs can boost similar accepted clips, downrank rejected patterns, and reuse learned trim offsets
+- reads saved Clip Notes and Session Notes as editing guidance, so notes like `too long`, `start later`, `more multi-kills`, `no generic filler`, or `more aftermath` influence future clip scoring and trim choices
+- shows a bottom-right readout for the current clip so you can see the score, bucket, memory effects, and note directives the tool understood
+- can finish the review and automatically render a final montage from the full detected candidate pool, using accepted/rejected review clips as guidance
+- selects soundtrack music automatically through the normal music picker when it builds that montage
 - works with local MP4s, folders, or YouTube URLs when `yt-dlp` is available
+
+The current learning loop is not a neural ML model. It is deterministic detector scoring plus persistent review memory from your labels, trims, Clip Notes, and Session Notes.
 
 ## Output
 
@@ -106,27 +120,28 @@ you will get:
 The plan JSON is useful for tuning the cut logic if you want to iterate on the montage style.
 
 When you provide multiple inputs, the tool scores each recording separately, pools the best moments, and builds one final montage across all of them.
+Selection does not impose a one-clip-per-video limit; if one source recording contains multiple distinct strong moments, the montage may use multiple clips from that same video.
 
 The tool also keeps a per-video analysis cache in `.automakeclip_cache/` so repeated runs over the same folder do not need to re-scan every MP4 unless the file or analysis settings changed.
 
 ## Music Source
 
-The music picker now works in this order:
+The music picker now defaults to YouTube playlist audio:
 
-- local library manifest in `music_library/tracks.json` for real songs you already downloaded or licensed
+- YouTube entries in `music_library/tracks.json` with `source_kind: "youtube"` or `source_kind: "youtube_playlist"`
+- local library manifest entries only if you explicitly switch `--music-source library`
 - optional public ccMixter catalog only if you explicitly switch `--music-source auto` or `--music-source ccmixter`
 - generated fallback only if you explicitly pass `--allow-generated-fallback`
 
-The local-library route is the safest way to use actual songs in a repeatable workflow. A starter schema lives at `music_library/tracks.example.json`.
+YouTube audio is fetched with `yt-dlp` into the output `music_cache/` folder when the montage is created. For playlist URLs, the picker downloads the first available playlist item by default. A starter schema lives at `music_library/tracks.example.json`.
 
-If you want actual trending songs instead of generated music:
+If you want actual YouTube playlist music:
 
-- license them through YouTube Creator Music if your channel is eligible
-- or use tracks from YouTube Audio Library
-- download them yourself
+- add the YouTube video or playlist URL
+- set `source_kind` to `youtube` or `youtube_playlist`
 - list them in `music_library/tracks.json`
 
-That keeps the workflow legal and repeatable without pretending random Spotify or YouTube uploads are safe to use.
+Use only audio you have rights to publish.
 
 The picker aims for:
 
@@ -144,7 +159,7 @@ Example:
 automakeclip \
   --input "/path/to/Videos" \
   --output latest-output/final_clip.mp4 \
-  --music-source library \
+  --music-source youtube \
   --music-manifest music_library/tracks.json
 ```
 
@@ -165,3 +180,10 @@ If you care about drop-sync specifically, add `drop_times` to your `music_librar
 - This repo is still intentionally easy to tweak in code if you want to push the style further.
 - `ffmpeg` is required at runtime even after Python dependencies are installed.
 - If your footage uses a different HUD layout or resolution, adjust the Overwatch ROI values in `src/automakeclip/config.py`.
+
+
+
+User generated handoff:
+Implemented:
+- Clip Notes and Session Notes are saved into review memory and interpreted as reusable guidance for future scoring and trim adjustments.
+- The selector allows multiple distinct clips from the same source video when they fit the target runtime.

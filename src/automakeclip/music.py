@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import json
 import math
+import subprocess
 import ssl
 import wave
 from pathlib import Path
 from typing import List, Optional
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import urlopen
 from urllib.error import URLError
 
 import numpy as np
 
 from .config import MusicConfig
+from .inputs import _yt_dlp_command
 from .types import MusicTrack
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -26,15 +28,33 @@ def select_music_track(mood: str, target_bpm: float, output_dir: Path, config: M
     output_dir.mkdir(parents=True, exist_ok=True)
     sources = _resolved_sources(config.source)
     library_error: Optional[MusicSelectionError] = None
+    youtube_error: Optional[MusicSelectionError] = None
 
-    if "library" in sources:
+    if "library" in sources or "spotify" in sources:
         try:
             library_tracks = _load_local_library_tracks(resolve_music_manifest_path(config.library_manifest))
         except MusicSelectionError as error:
             library_tracks = []
             library_error = error
+        if "spotify" in sources and "library" not in sources:
+            library_tracks = [track for track in library_tracks if _is_spotify_track(track)]
         if library_tracks:
             return max(library_tracks, key=lambda track: _local_track_score(track, mood, target_bpm))
+
+    if "youtube" in sources:
+        try:
+            youtube_tracks = _load_youtube_manifest_tracks(resolve_music_manifest_path(config.library_manifest))
+        except MusicSelectionError as error:
+            youtube_tracks = []
+            youtube_error = error
+        for candidate in sorted(youtube_tracks, key=lambda track: _local_track_score(track, mood, target_bpm), reverse=True):
+            try:
+                if candidate.local_path is None or not candidate.local_path.exists():
+                    candidate.local_path = _download_youtube_audio(candidate, output_dir, config)
+                return candidate
+            except MusicSelectionError as error:
+                youtube_error = error
+                continue
 
     if "ccmixter" in sources:
         tags = _tags_for_mood(mood)
@@ -55,8 +75,15 @@ def select_music_track(mood: str, target_bpm: float, output_dir: Path, config: M
 
     if config.allow_generated_fallback or "generated" in sources:
         return _synthesize_fallback_track(mood, target_bpm, output_dir)
+    if youtube_error is not None:
+        raise youtube_error
     if library_error is not None:
         raise library_error
+    if "spotify" in sources:
+        raise MusicSelectionError(
+            "No usable Spotify music was found. Add Spotify-tagged tracks to music_library/tracks.json with "
+            "a local audio file path; Spotify URLs alone cannot be mixed into an MP4."
+        )
     raise MusicSelectionError(
         "No usable real music track was found. Add licensed songs to music_library/tracks.json "
         "or pass --allow-generated-fallback if you want the synthetic backup."
@@ -140,16 +167,22 @@ def _load_local_library_tracks(manifest_path: Path) -> List[MusicTrack]:
         raise MusicSelectionError("Music library manifest must be a JSON array.")
 
     tracks: List[MusicTrack] = []
+    skipped_spotify_records = 0
     for record in payload:
         if not isinstance(record, dict):
             continue
+        record_is_spotify = _record_is_spotify(record)
         local_path_value = record.get("local_path")
         if not local_path_value:
+            if record_is_spotify:
+                skipped_spotify_records += 1
             continue
         local_path = Path(str(local_path_value)).expanduser()
         if not local_path.is_absolute():
             local_path = (manifest_path.parent / local_path).resolve()
         if not local_path.exists():
+            if record_is_spotify:
+                skipped_spotify_records += 1
             continue
         tags_value = record.get("tags") or []
         if isinstance(tags_value, str):
@@ -173,7 +206,121 @@ def _load_local_library_tracks(manifest_path: Path) -> List[MusicTrack]:
                 drop_times=_coerce_float_list(record.get("drop_times")) or _default_drop_times(_coerce_float(record.get("bpm"))),
             )
         )
+    if not tracks and skipped_spotify_records:
+        raise MusicSelectionError(
+            "Spotify music entries need a local audio file path that exists. Spotify links are metadata only; "
+            "the renderer cannot pull encrypted Spotify streams directly."
+        )
     return tracks
+
+
+def _load_youtube_manifest_tracks(manifest_path: Path) -> List[MusicTrack]:
+    if not manifest_path.exists():
+        return []
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise MusicSelectionError(f"Unable to read music library manifest: {error}") from error
+
+    if not isinstance(payload, list):
+        raise MusicSelectionError("Music library manifest must be a JSON array.")
+
+    tracks: List[MusicTrack] = []
+    for record in payload:
+        if not isinstance(record, dict) or not _record_is_youtube(record):
+            continue
+        local_path = _record_local_path(record, manifest_path)
+        source_kind = str(record.get("source_kind") or "youtube")
+        if _record_is_youtube_playlist(record) and source_kind == "youtube":
+            source_kind = "youtube_playlist"
+        url = str(record.get("download_url") or record.get("page_url") or "")
+        if not url:
+            continue
+        tracks.append(
+            MusicTrack(
+                title=str(record.get("title") or "YouTube Music"),
+                artist=str(record.get("artist") or "YouTube"),
+                license_name=str(record.get("license_name") or "User-supplied YouTube audio - verify rights before publishing"),
+                page_url=str(record.get("page_url") or url),
+                download_url=url,
+                bpm=_coerce_float(record.get("bpm")),
+                tags=_coerce_tags(record.get("tags")),
+                local_path=local_path,
+                source_kind=source_kind,
+                usage_note=str(record.get("usage_note") or "Downloaded with yt-dlp from a user-supplied YouTube URL."),
+                youtube_safe=bool(record.get("youtube_safe", False)),
+                trend_score=float(record.get("trend_score") or 0.0),
+                drop_times=_coerce_float_list(record.get("drop_times")) or _default_drop_times(_coerce_float(record.get("bpm"))),
+            )
+        )
+    return tracks
+
+
+def _record_local_path(record: dict, manifest_path: Path) -> Optional[Path]:
+    local_path_value = record.get("local_path")
+    if not local_path_value:
+        return None
+    local_path = Path(str(local_path_value)).expanduser()
+    if not local_path.is_absolute():
+        local_path = (manifest_path.parent / local_path).resolve()
+    return local_path if local_path.exists() else None
+
+
+def _download_youtube_audio(track: MusicTrack, output_dir: Path, config: MusicConfig) -> Path:
+    url = track.download_url or track.page_url
+    if not _looks_like_youtube_url(url):
+        raise MusicSelectionError(f"Music track is not a YouTube URL: {url}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    playlist_args = (
+        [
+            "--yes-playlist",
+            "--playlist-end",
+            str(max(1, config.query_limit)),
+            "--max-downloads",
+            "1",
+            "--ignore-errors",
+        ]
+        if _is_youtube_playlist_track(track)
+        else ["--no-playlist"]
+    )
+    command = [
+        *_yt_dlp_command(),
+        *playlist_args,
+        "-f",
+        "ba/best",
+        "--extract-audio",
+        "--audio-format",
+        "mp3",
+        "--audio-quality",
+        "0",
+        "-o",
+        str(output_dir / "%(title).120B [%(id)s].%(ext)s"),
+        "--print",
+        "after_move:filepath",
+        url,
+    ]
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(config.download_timeout_seconds, 30) * 4,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise MusicSelectionError(f"Unable to download YouTube music with yt-dlp: {error}") from error
+    audio_paths = [
+        Path(line.strip()).expanduser().resolve()
+        for line in process.stdout.splitlines()
+        if line.strip()
+    ]
+    for audio_path in audio_paths:
+        if audio_path.exists() and audio_path.suffix.lower() in {".mp3", ".m4a", ".opus", ".webm", ".wav", ".ogg"}:
+            return audio_path
+    if process.returncode != 0:
+        raise MusicSelectionError(process.stderr.strip() or f"Unable to download YouTube music from {url}")
+    raise MusicSelectionError(f"`yt-dlp` did not report a usable audio file for {url}")
 
 
 def _download_file(url: str, destination: Path, timeout_seconds: int) -> None:
@@ -195,7 +342,11 @@ def _tags_for_mood(mood: str) -> List[str]:
 def _resolved_sources(source: str) -> List[str]:
     normalized = source.strip().lower()
     if normalized == "auto":
-        return ["library", "ccmixter"]
+        return ["youtube", "library", "ccmixter"]
+    if normalized == "youtube":
+        return ["youtube"]
+    if normalized == "spotify":
+        return ["spotify"]
     if normalized == "library":
         return ["library"]
     if normalized == "ccmixter":
@@ -209,7 +360,13 @@ def _local_track_score(track: MusicTrack, mood: str, target_bpm: float) -> float
     tag_bonus = sum(1.0 for tag in track.tags if tag.lower() in _tags_for_mood(mood))
     bpm_penalty = _track_distance(track, target_bpm)
     youtube_bonus = 8.0 if track.youtube_safe else 0.0
-    source_bonus = 6.0 if track.source_kind in {"youtube_audio_library", "creator_music"} else 0.0
+    source_bonus = 0.0
+    if _is_spotify_track(track):
+        source_bonus = 7.0
+    elif _is_youtube_track(track):
+        source_bonus = 6.5
+    elif track.source_kind in {"youtube_audio_library", "creator_music"}:
+        source_bonus = 6.0
     return track.trend_score * 2.5 + tag_bonus * 3.0 + youtube_bonus + source_bonus - bpm_penalty * 0.2
 
 
@@ -217,6 +374,67 @@ def _track_distance(track: MusicTrack, target_bpm: float) -> float:
     if track.bpm is None:
         return 25.0
     return abs(track.bpm - target_bpm)
+
+
+def _is_spotify_track(track: MusicTrack) -> bool:
+    return (
+        track.source_kind.lower() == "spotify"
+        or "open.spotify.com" in track.page_url.lower()
+        or track.download_url.lower().startswith("spotify:")
+    )
+
+
+def _record_is_spotify(record: dict) -> bool:
+    return (
+        str(record.get("source_kind") or "").lower() == "spotify"
+        or "open.spotify.com" in str(record.get("page_url") or "").lower()
+        or str(record.get("download_url") or "").lower().startswith("spotify:")
+    )
+
+
+def _is_youtube_track(track: MusicTrack) -> bool:
+    return track.source_kind.lower() in {"youtube", "youtube_playlist"} or _looks_like_youtube_url(track.page_url) or _looks_like_youtube_url(track.download_url)
+
+
+def _is_youtube_playlist_track(track: MusicTrack) -> bool:
+    return track.source_kind.lower() == "youtube_playlist" or _youtube_url_has_playlist(track.download_url) or _youtube_url_has_playlist(track.page_url)
+
+
+def _record_is_youtube(record: dict) -> bool:
+    return (
+        str(record.get("source_kind") or "").lower() in {"youtube", "youtube_playlist"}
+        or _looks_like_youtube_url(str(record.get("page_url") or ""))
+        or _looks_like_youtube_url(str(record.get("download_url") or ""))
+    )
+
+
+def _record_is_youtube_playlist(record: dict) -> bool:
+    return (
+        str(record.get("source_kind") or "").lower() == "youtube_playlist"
+        or _youtube_url_has_playlist(str(record.get("page_url") or ""))
+        or _youtube_url_has_playlist(str(record.get("download_url") or ""))
+    )
+
+
+def _looks_like_youtube_url(value: str) -> bool:
+    parsed = urlparse(value)
+    host = parsed.netloc.lower()
+    return parsed.scheme in {"http", "https"} and ("youtube.com" in host or "youtu.be" in host)
+
+
+def _youtube_url_has_playlist(value: str) -> bool:
+    if not _looks_like_youtube_url(value):
+        return False
+    parsed = urlparse(value)
+    return bool(parse_qs(parsed.query).get("list"))
+
+
+def _coerce_tags(value) -> List[str]:
+    if isinstance(value, str):
+        return [item.strip() for item in value.replace(",", " ").split() if item.strip()]
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
 
 
 def _safe_music_filename(track: MusicTrack) -> str:
