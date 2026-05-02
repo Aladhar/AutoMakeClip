@@ -68,6 +68,18 @@ class RenderConfig:
     transition_style: str = "smooth"
     transition_duration: float = 0.6
     transition_asset_dir: str = "assets/transitions"
+    # A pool of transition styles to choose from when rendering. The
+    # renderer will cycle through these styles by default or randomize
+    # if `transition_randomize` is True. Styles can be 'smooth', 'fire',
+    # 'fade', 'wipeleft', 'wiperight', etc.
+    transition_pool: List[str] = field(default_factory=lambda: ["smooth", "smooth", "fade"])
+    transition_randomize: bool = False
+    # How to render the intro. Options:
+    # - 'still': the current still-image intro (default legacy behavior)
+    # - 'clip': use a short clip from the lead source as the intro
+    # - 'transition': use a short clip and allow the renderer to apply
+    #   the configured transition into the first segment
+    intro_mode: str = "transition"
 
 
 @dataclass

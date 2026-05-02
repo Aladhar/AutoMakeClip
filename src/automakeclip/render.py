@@ -1,4 +1,5 @@
 import json
+import random
 import tempfile
 from pathlib import Path
 from typing import Dict, List
@@ -66,7 +67,11 @@ def render_montage(plan: MontagePlan, analysis_config: AnalysisConfig, render_co
 
         concat_entries = [intro_path] + segment_paths
 
-        if render_config.transition_style == "none":
+        # Determine whether to use a transition pool for per-cut variety.
+        pool = getattr(render_config, "transition_pool", None) or []
+        pool = [p for p in pool if p and p.lower() != "none"]
+
+        if render_config.transition_style == "none" and not pool:
             concat_file = temp_dir / "concat.txt"
             concat_file.write_text("".join(f"file '{path.as_posix()}'\n" for path in concat_entries), encoding="utf-8")
 
@@ -96,11 +101,21 @@ def render_montage(plan: MontagePlan, analysis_config: AnalysisConfig, render_co
                 ]
             )
         else:
-            # Sequentially merge each pair using the configured transition
+            # Sequentially merge each pair using the configured transition.
+            # If a transition pool is provided, cycle through or randomize
+            # selections to add variety between cuts.
             current = concat_entries[0]
+            use_pool = bool(pool)
             for idx, next_item in enumerate(concat_entries[1:], start=1):
                 merged = temp_dir / f"stitched_{idx:02d}.mp4"
-                merge_with_transition(Path(current), Path(next_item), merged, render_config, style=render_config.transition_style)
+                if use_pool:
+                    if render_config.transition_randomize:
+                        style = random.choice(pool)
+                    else:
+                        style = pool[(idx - 1) % len(pool)]
+                else:
+                    style = render_config.transition_style
+                merge_with_transition(Path(current), Path(next_item), merged, render_config, style=style)
                 current = merged
             stitched_path = Path(current)
 
@@ -139,74 +154,129 @@ def _create_intro(output_path: Path, plan: MontagePlan, config: RenderConfig, in
     lead_source_path = Path(plan.segments[0].source_path) if plan.segments and plan.segments[0].source_path else plan.input_paths[0]
     lead_source_duration = plan.source_durations.get(str(lead_source_path), plan.source_duration)
     lead_time = max(0.0, min(plan.segments[0].start if plan.segments else 0.0, max(lead_source_duration - 0.1, 0.0)))
-    still_path = output_path.with_suffix(".jpg")
 
-    run_ffmpeg(
-        [
-            "ffmpeg",
-            "-y",
-            "-v",
-            "error",
-            "-ss",
-            f"{lead_time:.3f}",
-            "-i",
-            str(lead_source_path),
-            "-frames:v",
-            "1",
-            str(still_path),
-        ]
-    )
+    # Render the intro according to the configured intro_mode. 'still'
+    # preserves the legacy still-image intro; 'clip' uses a short
+    # extracted clip; 'transition' behaves like 'clip' but is intended
+    # to be followed by a transition into the first segment.
+    if getattr(config, "intro_mode", "still") == "still":
+        still_path = output_path.with_suffix(".jpg")
 
-    filter_complex = (
-        f"scale={config.width}:{config.height}:force_original_aspect_ratio=increase,"
-        f"crop={config.width}:{config.height},"
-        f"fps={config.fps},"
-        "boxblur=18:2,"
-        "eq=contrast=1.08:saturation=1.15,"
-        "drawbox=x=0:y=0:w=iw:h=ih:color=black@0.42:t=fill,"
-        "drawbox=x=100:y=720:w=1720:h=180:color=black@0.22:t=fill,"
-        "fade=t=in:st=0:d=0.35,"
-        f"fade=t=out:st={max(0.0, intro_seconds - 0.55):.3f}:d=0.45"
-    )
+        run_ffmpeg(
+            [
+                "ffmpeg",
+                "-y",
+                "-v",
+                "error",
+                "-ss",
+                f"{lead_time:.3f}",
+                "-i",
+                str(lead_source_path),
+                "-frames:v",
+                "1",
+                str(still_path),
+            ]
+        )
 
-    run_ffmpeg(
-        [
-            "ffmpeg",
-            "-y",
-            "-v",
-            "error",
-            "-loop",
-            "1",
-            "-t",
-            f"{intro_seconds:.3f}",
-            "-i",
-            str(still_path),
-            "-f",
-            "lavfi",
-            "-t",
-            f"{intro_seconds:.3f}",
-            "-i",
-            "anullsrc=channel_layout=stereo:sample_rate=48000",
-            "-vf",
-            filter_complex,
-            "-shortest",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            str(config.fps),
-            "-c:v",
-            config.video_codec,
-            "-preset",
-            config.preset,
-            "-crf",
-            str(config.crf),
-            "-c:a",
-            config.audio_codec,
-            "-b:a",
-            config.audio_bitrate,
-            str(output_path),
-        ]
-    )
+        filter_complex = (
+            f"scale={config.width}:{config.height}:force_original_aspect_ratio=increase,"
+            f"crop={config.width}:{config.height},"
+            f"fps={config.fps},"
+            "boxblur=18:2,"
+            "eq=contrast=1.08:saturation=1.15,"
+            "drawbox=x=0:y=0:w=iw:h=ih:color=black@0.42:t=fill,"
+            "drawbox=x=100:y=720:w=1720:h=180:color=black@0.22:t=fill,"
+            "fade=t=in:st=0:d=0.35,"
+            f"fade=t=out:st={max(0.0, intro_seconds - 0.55):.3f}:d=0.45"
+        )
+
+        run_ffmpeg(
+            [
+                "ffmpeg",
+                "-y",
+                "-v",
+                "error",
+                "-loop",
+                "1",
+                "-t",
+                f"{intro_seconds:.3f}",
+                "-i",
+                str(still_path),
+                "-f",
+                "lavfi",
+                "-t",
+                f"{intro_seconds:.3f}",
+                "-i",
+                "anullsrc=channel_layout=stereo:sample_rate=48000",
+                "-vf",
+                filter_complex,
+                "-shortest",
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                str(config.fps),
+                "-c:v",
+                config.video_codec,
+                "-preset",
+                config.preset,
+                "-crf",
+                str(config.crf),
+                "-c:a",
+                config.audio_codec,
+                "-b:a",
+                config.audio_bitrate,
+                str(output_path),
+            ]
+        )
+    else:
+        # Produce a short clip from the lead source. This will either
+        # serve directly as the intro clip or be followed by a transition
+        # into the first segment (depending on `intro_mode`). Keep the
+        # visual treatments but avoid the heavy blur used for stills.
+        filter_complex = (
+            f"scale={config.width}:{config.height}:force_original_aspect_ratio=increase,"
+            f"crop={config.width}:{config.height},"
+            f"fps={config.fps},"
+            "eq=contrast=1.08:saturation=1.15,"
+            "drawbox=x=0:y=0:w=iw:h=ih:color=black@0.42:t=fill,"
+            "drawbox=x=100:y=720:w=1720:h=180:color=black@0.22:t=fill,"
+            "fade=t=in:st=0:d=0.35,"
+            f"fade=t=out:st={max(0.0, intro_seconds - 0.55):.3f}:d=0.45"
+        )
+
+        run_ffmpeg(
+            [
+                "ffmpeg",
+                "-y",
+                "-v",
+                "error",
+                "-ss",
+                f"{lead_time:.3f}",
+                "-i",
+                str(lead_source_path),
+                "-t",
+                f"{intro_seconds:.3f}",
+                "-vf",
+                filter_complex,
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                str(config.fps),
+                "-c:v",
+                config.video_codec,
+                "-preset",
+                config.preset,
+                "-crf",
+                str(config.crf),
+                "-af",
+                "aresample=48000",
+                "-c:a",
+                config.audio_codec,
+                "-b:a",
+                config.audio_bitrate,
+                str(output_path),
+            ]
+        )
 
 
 def _render_segment(segment: Segment, output_path: Path, config: RenderConfig) -> None:

@@ -55,6 +55,13 @@ def merge_with_transition(prev_path: Path, next_path: Path, out_path: Path, conf
 
     fire_asset = Path(config.transition_asset_dir) / "fire.webm"
 
+    # Map requested style to an xfade transition name when appropriate.
+    transition_name = "wipeleft"
+    if style == "smooth":
+        transition_name = "fade"
+    elif style != "fire":
+        transition_name = style
+
     # Build a simple xfade + acrossfade command. If a fire asset exists, try
     # to overlay/blend it on top of the transition region; if overlay fails,
     # fall back to plain xfade.
@@ -74,7 +81,7 @@ def merge_with_transition(prev_path: Path, next_path: Path, out_path: Path, conf
                     str(fire_asset),
                     "-filter_complex",
                     (
-                        f"[0:v][1:v]xfade=transition=wipeleft:duration={D:.3f}:offset={offset:.3f},format=rgba[vxf];"
+                        f"[0:v][1:v]xfade=transition={transition_name}:duration={D:.3f}:offset={offset:.3f},format=rgba[vxf];"
                         f"[2:v]trim=duration={D:.3f},setpts=PTS-STARTPTS,format=rgba[fire];"
                         f"[vxf][fire]blend=all_mode=screen:all_opacity=0.9,format=yuv420p[vout];"
                         f"[0:a]afade=t=out:st={offset:.3f}:d={D:.3f}[a0];"
@@ -109,7 +116,7 @@ def merge_with_transition(prev_path: Path, next_path: Path, out_path: Path, conf
                     str(next_path),
                     "-filter_complex",
                     (
-                        f"[0:v][1:v]xfade=transition=wipeleft:duration={D:.3f}:offset={offset:.3f},format=yuv420p[v];"
+                        f"[0:v][1:v]xfade=transition={transition_name}:duration={D:.3f}:offset={offset:.3f},format=yuv420p[v];"
                         f"[0:a][1:a]acrossfade=d={D:.3f}[a]"
                     ),
                     "-map",

@@ -97,6 +97,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the default transition duration in seconds.",
     )
     parser.add_argument(
+        "--intro-mode",
+        choices=("still", "clip", "transition"),
+        default=None,
+        help="How to render the intro: 'still', 'clip', or 'transition'.",
+    )
+    parser.add_argument(
+        "--transition-pool",
+        default=None,
+        help="Comma-separated list of transition styles to cycle through (e.g. smooth,fade,wipeleft).",
+    )
+    parser.add_argument(
+        "--transition-randomize",
+        action="store_true",
+        help="Randomize transition selection from the pool instead of cycling.",
+    )
+    parser.add_argument(
         "--youtube-playlist-limit",
         type=int,
         default=24,
@@ -125,6 +141,12 @@ def main() -> int:
         config.render.transition_style = args.transition_style
     if args.transition_duration is not None:
         config.render.transition_duration = args.transition_duration
+    if args.intro_mode is not None:
+        config.render.intro_mode = args.intro_mode
+    if args.transition_pool is not None:
+        config.render.transition_pool = [s.strip() for s in args.transition_pool.split(",") if s.strip()]
+    if args.transition_randomize:
+        config.render.transition_randomize = True
     try:
         from .analysis import analyze_gameplay, infer_montage_profile
         from .cache import load_analysis_cache, load_cached_analysis_entries, store_analysis_cache
