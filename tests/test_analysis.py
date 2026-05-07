@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from automakeclip.analysis import _smooth, collect_candidate_segments, extract_borderline_review_segments, extract_candidate_segments
+from automakeclip.analysis import _robust_normalize, _smooth, collect_candidate_segments, extract_borderline_review_segments, extract_candidate_segments
 from automakeclip.config import AnalysisConfig
 from automakeclip.types import AnalysisTimeline, VideoMetadata
 
@@ -12,6 +12,13 @@ class AnalysisTests(unittest.TestCase):
         values = np.array([0.2, 0.8], dtype=np.float32)
         smoothed = _smooth(values, window_size=5)
         self.assertEqual(smoothed.shape, values.shape)
+
+    def test_robust_normalize_caps_extreme_sparse_spikes(self) -> None:
+        values = np.array([0.0, 0.0, 0.0, 0.009], dtype=np.float32)
+        normalized = _robust_normalize(values)
+
+        self.assertLessEqual(float(normalized.max()), 4.0)
+        self.assertGreaterEqual(float(normalized.min()), -3.5)
 
     def test_prefers_steelseries_kill_windows(self) -> None:
         timeline = AnalysisTimeline(
@@ -171,6 +178,26 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(candidates)
         self.assertTrue(any("Generic" in candidate.note for candidate in candidates))
         self.assertTrue(any(candidate.highlight_time is not None for candidate in candidates))
+
+    def test_rejects_scene_only_spikes_without_fight_consensus(self) -> None:
+        timeline = AnalysisTimeline(
+            times=[0.0, 4.0, 8.0, 12.0, 16.0, 20.0, 24.0, 28.0],
+            visual_motion=[0.02, 0.02, 0.02, 0.02, 0.03, 0.02, 0.02, 0.02],
+            killfeed_motion=[0.0] * 8,
+            hud_motion=[0.0] * 8,
+            center_motion=[0.01] * 8,
+            audio_rms=[0.01] * 8,
+            audio_flux=[0.0] * 8,
+            scene_change=[0.01, 0.01, 0.01, 0.75, 0.95, 0.7, 0.01, 0.01],
+            gameplay_confidence=[0.15, 0.16, 0.14, 0.2, 0.22, 0.18, 0.15, 0.14],
+            scores=[0.02, 0.03, 0.02, 0.12, 0.18, 0.11, 0.02, 0.02],
+            duration=32.0,
+        )
+        metadata = VideoMetadata(duration=32.0, width=1920, height=1080, fps=60.0)
+
+        candidates = extract_candidate_segments(timeline, metadata, AnalysisConfig())
+
+        self.assertFalse(candidates)
 
     def test_extracts_borderline_review_segments_from_midband_activity(self) -> None:
         timeline = AnalysisTimeline(

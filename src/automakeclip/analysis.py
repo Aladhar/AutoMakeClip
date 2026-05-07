@@ -213,6 +213,16 @@ def _extract_heuristic_segments(timeline: AnalysisTimeline, metadata: VideoMetad
     times = np.array(timeline.times, dtype=np.float32)
     scores = np.array(timeline.scores, dtype=np.float32)
     gameplay = np.array(timeline.gameplay_confidence, dtype=np.float32)
+    killfeed = np.array(timeline.killfeed_motion, dtype=np.float32)
+    hud = np.array(timeline.hud_motion, dtype=np.float32)
+    center = np.array(timeline.center_motion, dtype=np.float32)
+    visual = np.array(timeline.visual_motion, dtype=np.float32)
+    audio_flux = np.array(timeline.audio_flux, dtype=np.float32)
+    positive_killfeed = np.clip(_robust_normalize(killfeed), 0.0, None)
+    positive_hud = np.clip(_robust_normalize(hud), 0.0, None)
+    positive_center = np.clip(_robust_normalize(center), 0.0, None)
+    positive_visual = np.clip(_robust_normalize(visual), 0.0, None)
+    positive_audio = np.clip(_robust_normalize(audio_flux), 0.0, None)
     threshold = np.percentile(scores, config.highlight_threshold_percentile)
     gameplay_floor = np.percentile(gameplay, 58)
     above = (scores >= threshold) & (gameplay >= gameplay_floor)
@@ -223,12 +233,36 @@ def _extract_heuristic_segments(timeline: AnalysisTimeline, metadata: VideoMetad
         if is_active and start_index is None:
             start_index = index
         elif not is_active and start_index is not None:
-            candidate = _segment_from_range(start_index, index - 1, scores, times, metadata.duration, config)
+            candidate = _segment_from_range(
+                start_index,
+                index - 1,
+                scores,
+                times,
+                metadata.duration,
+                config,
+                positive_killfeed,
+                positive_hud,
+                positive_center,
+                positive_visual,
+                positive_audio,
+            )
             if candidate is not None:
                 candidates.append(candidate)
             start_index = None
     if start_index is not None:
-        candidate = _segment_from_range(start_index, len(scores) - 1, scores, times, metadata.duration, config)
+        candidate = _segment_from_range(
+            start_index,
+            len(scores) - 1,
+            scores,
+            times,
+            metadata.duration,
+            config,
+            positive_killfeed,
+            positive_hud,
+            positive_center,
+            positive_visual,
+            positive_audio,
+        )
         if candidate is not None:
             candidates.append(candidate)
 
@@ -378,7 +412,19 @@ def infer_montage_profile(segments: List[Segment]) -> Tuple[str, float]:
     return "balanced", 138.0
 
 
-def _segment_from_range(start_index: int, end_index: int, scores: np.ndarray, times: np.ndarray, duration: float, config: AnalysisConfig) -> Optional[Segment]:
+def _segment_from_range(
+    start_index: int,
+    end_index: int,
+    scores: np.ndarray,
+    times: np.ndarray,
+    duration: float,
+    config: AnalysisConfig,
+    positive_killfeed: np.ndarray,
+    positive_hud: np.ndarray,
+    positive_center: np.ndarray,
+    positive_visual: np.ndarray,
+    positive_audio: np.ndarray,
+) -> Optional[Segment]:
     if end_index < start_index:
         return None
 
@@ -386,9 +432,29 @@ def _segment_from_range(start_index: int, end_index: int, scores: np.ndarray, ti
     peak_offset = int(np.argmax(local_scores))
     peak_index = start_index + peak_offset
     peak_time = float(times[peak_index])
-    peak_score = float(scores[peak_index])
+    support_votes = sum(
+        [
+            positive_killfeed[peak_index] >= 0.45,
+            positive_audio[peak_index] >= 0.35,
+            positive_hud[peak_index] >= 0.45,
+            positive_center[peak_index] >= 0.40,
+            positive_visual[peak_index] >= 0.40,
+        ]
+    )
+    if support_votes < 2:
+        return None
+    if positive_killfeed[peak_index] < 0.30 and positive_audio[peak_index] < 0.30:
+        return None
 
-    label = "highlight" if peak_score > np.percentile(scores, 90) else "fight"
+    peak_score = (
+        float(scores[peak_index])
+        + 0.35 * float(positive_killfeed[peak_index])
+        + 0.22 * float(positive_audio[peak_index])
+        + 0.18 * float(positive_hud[peak_index])
+        + 0.14 * float(positive_center[peak_index])
+    )
+
+    label = "highlight" if (positive_killfeed[peak_index] + 0.65 * positive_audio[peak_index] + 0.30 * positive_hud[peak_index]) >= 1.35 else "fight"
     note = "Kill-feed heavy highlight window." if label == "highlight" else "Active team-fight section."
     segment = _segment_around_peak(
         peak_time=peak_time,
@@ -499,18 +565,37 @@ def _extract_generic_peak_segments(timeline: AnalysisTimeline, metadata: VideoMe
         peak_time = float(times[index])
         if any(abs(peak_time - float(times[accepted])) < config.generic_peak_min_spacing_seconds for accepted in accepted_indices):
             continue
+        signal_votes = sum(
+            [
+                positive_killfeed[index] >= 0.55,
+                positive_audio[index] >= 0.45,
+                positive_hud[index] >= 0.45,
+                positive_center[index] >= 0.45,
+                positive_scores[index] >= 0.55,
+            ]
+        )
+        if signal_votes < 2:
+            continue
+        if positive_killfeed[index] < 0.35 and positive_audio[index] < 0.35:
+            continue
         accepted_indices.append(index)
         start = max(0.0, peak_time - config.pre_roll_seconds)
         end = min(metadata.duration, peak_time + config.post_roll_seconds)
         start, end = _clamp_segment(start, end, metadata.duration, config)
         peak_strength = float(generic_signal[index])
-        label = "highlight" if (positive_killfeed[index] + 0.7 * positive_audio[index]) >= 1.25 else "fight"
+        label = "highlight" if (positive_killfeed[index] + 0.7 * positive_audio[index] + 0.35 * positive_hud[index]) >= 1.45 else "fight"
         note = "Generic kill-heavy peak window." if label == "highlight" else "Generic high-activity fight window."
         segments.append(
             Segment(
                 start=start,
                 end=end,
-                score=peak_strength * 2.4 + float(scores[index]) * 0.55 + max(float(gameplay[index]), 0.0) * 0.25,
+                score=(
+                    peak_strength * 1.45
+                    + float(positive_scores[index]) * 0.90
+                    + float(positive_killfeed[index]) * 0.70
+                    + float(positive_audio[index]) * 0.55
+                    + max(float(gameplay[index]), 0.0) * 0.20
+                ),
                 label=label,
                 note=note,
                 highlight_time=peak_time,
@@ -656,11 +741,14 @@ def _roi(frame: np.ndarray, roi: Tuple[float, float, float, float]) -> np.ndarra
 
 def _robust_normalize(values: np.ndarray) -> np.ndarray:
     values = np.array(values, dtype=np.float32)
+    if values.size == 0:
+        return values
     median = np.median(values)
     upper = np.percentile(values, 75)
     lower = np.percentile(values, 25)
-    spread = max(upper - lower, 1e-6)
-    return (values - median) / spread
+    spread = max(upper - lower, float(np.std(values)) * 0.5, 1e-6)
+    normalized = (values - median) / spread
+    return np.clip(normalized, -3.5, 4.0)
 
 
 def _smooth(values: np.ndarray, window_size: int) -> np.ndarray:
