@@ -136,6 +136,18 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(selected, candidates)
         self.assertFalse(cross_capture_duplicate(candidates[0], candidates[1]))
 
+    def test_does_not_fill_budget_with_weak_generic_filler(self) -> None:
+        candidates = [
+            Segment(0.0, 5.0, 15.0, "highlight", "Generic kill-heavy peak window.", "/tmp/a.mp4"),
+            Segment(10.0, 15.0, 13.0, "highlight", "Generic kill-heavy peak window.", "/tmp/b.mp4"),
+            Segment(20.0, 25.0, 10.0, "highlight", "Generic kill-heavy peak window.", "/tmp/c.mp4"),
+            Segment(30.0, 35.0, 8.0, "highlight", "Generic kill-heavy peak window.", "/tmp/d.mp4"),
+        ]
+
+        selected = select_global_segments(candidates, target_seconds=24.0, intro_seconds=0.0)
+
+        self.assertEqual(selected, candidates[:2])
+
     def test_suppresses_same_rolling_capture_cluster_even_when_event_anchors_drift(self) -> None:
         candidates = [
             Segment(

@@ -30,10 +30,18 @@ def analyze_gameplay(source_path, metadata: VideoMetadata, config: AnalysisConfi
     timeline_times = frame_times
     audio_rms = _fit_to_length(audio_rms, len(timeline_times))
     audio_flux = _fit_to_length(audio_flux, len(timeline_times))
+    absolute_presence = (
+        0.34 * _absolute_presence_score(center_motion, floor=0.010, scale=0.080)
+        + 0.26 * _absolute_presence_score(hud_motion, floor=0.010, scale=0.080)
+        + 0.20 * _absolute_presence_score(visual_motion, floor=0.010, scale=0.080)
+        + 0.12 * _absolute_presence_score(killfeed_motion, floor=0.020, scale=0.120)
+        + 0.08 * _absolute_presence_score(scene_change, floor=0.030, scale=0.240)
+    )
     gameplay_confidence = _smooth(
-        0.42 * _robust_normalize(center_motion)
-        + 0.33 * _robust_normalize(hud_motion)
-        + 0.25 * _robust_normalize(visual_motion),
+        0.46 * _robust_normalize(center_motion)
+        + 0.30 * _robust_normalize(hud_motion)
+        + 0.14 * _robust_normalize(visual_motion)
+        + 0.60 * absolute_presence,
         max(3, config.score_smoothing_frames - 1),
     )
 
@@ -90,6 +98,9 @@ def collect_candidate_segments(
 
 
 def extract_candidate_segments(timeline: AnalysisTimeline, metadata: VideoMetadata, config: AnalysisConfig) -> List[Segment]:
+    if not metadata.kill_events and not _source_has_meaningful_gameplay(timeline):
+        return []
+
     event_candidates = _extract_event_segments(timeline, metadata, config)
     heuristic_candidates = _extract_heuristic_segments(timeline, metadata, config)
 
@@ -223,6 +234,11 @@ def _extract_heuristic_segments(timeline: AnalysisTimeline, metadata: VideoMetad
     positive_center = np.clip(_robust_normalize(center), 0.0, None)
     positive_visual = np.clip(_robust_normalize(visual), 0.0, None)
     positive_audio = np.clip(_robust_normalize(audio_flux), 0.0, None)
+    absolute_killfeed = _absolute_presence_score(killfeed, floor=0.020, scale=0.120)
+    absolute_hud = _absolute_presence_score(hud, floor=0.010, scale=0.080)
+    absolute_center = _absolute_presence_score(center, floor=0.010, scale=0.080)
+    absolute_visual = _absolute_presence_score(visual, floor=0.010, scale=0.080)
+    absolute_audio = _absolute_presence_score(audio_flux, floor=0.050, scale=0.300)
     threshold = np.percentile(scores, config.highlight_threshold_percentile)
     gameplay_floor = np.percentile(gameplay, 58)
     above = (scores >= threshold) & (gameplay >= gameplay_floor)
@@ -245,6 +261,11 @@ def _extract_heuristic_segments(timeline: AnalysisTimeline, metadata: VideoMetad
                 positive_center,
                 positive_visual,
                 positive_audio,
+                absolute_killfeed,
+                absolute_hud,
+                absolute_center,
+                absolute_visual,
+                absolute_audio,
             )
             if candidate is not None:
                 candidates.append(candidate)
@@ -262,6 +283,11 @@ def _extract_heuristic_segments(timeline: AnalysisTimeline, metadata: VideoMetad
             positive_center,
             positive_visual,
             positive_audio,
+            absolute_killfeed,
+            absolute_hud,
+            absolute_center,
+            absolute_visual,
+            absolute_audio,
         )
         if candidate is not None:
             candidates.append(candidate)
@@ -424,6 +450,11 @@ def _segment_from_range(
     positive_center: np.ndarray,
     positive_visual: np.ndarray,
     positive_audio: np.ndarray,
+    absolute_killfeed: np.ndarray,
+    absolute_hud: np.ndarray,
+    absolute_center: np.ndarray,
+    absolute_visual: np.ndarray,
+    absolute_audio: np.ndarray,
 ) -> Optional[Segment]:
     if end_index < start_index:
         return None
@@ -444,6 +475,14 @@ def _segment_from_range(
     if support_votes < 2:
         return None
     if positive_killfeed[peak_index] < 0.30 and positive_audio[peak_index] < 0.30:
+        return None
+    if not _has_absolute_action_support(
+        absolute_killfeed[peak_index],
+        absolute_audio[peak_index],
+        absolute_hud[peak_index],
+        absolute_center[peak_index],
+        absolute_visual[peak_index],
+    ):
         return None
 
     peak_score = (
@@ -538,6 +577,11 @@ def _extract_generic_peak_segments(timeline: AnalysisTimeline, metadata: VideoMe
     positive_hud = np.clip(_robust_normalize(hud), 0.0, None)
     positive_scene = np.clip(_robust_normalize(scenes), 0.0, None)
     positive_scores = np.clip(_robust_normalize(scores), 0.0, None)
+    absolute_killfeed = _absolute_presence_score(killfeed, floor=0.020, scale=0.120)
+    absolute_hud = _absolute_presence_score(hud, floor=0.010, scale=0.080)
+    absolute_center = _absolute_presence_score(center, floor=0.010, scale=0.080)
+    absolute_visual = _absolute_presence_score(np.array(timeline.visual_motion, dtype=np.float32), floor=0.010, scale=0.080)
+    absolute_audio = _absolute_presence_score(audio_flux, floor=0.050, scale=0.300)
 
     generic_signal = (
         0.33 * positive_killfeed
@@ -577,6 +621,14 @@ def _extract_generic_peak_segments(timeline: AnalysisTimeline, metadata: VideoMe
         if signal_votes < 2:
             continue
         if positive_killfeed[index] < 0.35 and positive_audio[index] < 0.35:
+            continue
+        if not _has_absolute_action_support(
+            absolute_killfeed[index],
+            absolute_audio[index],
+            absolute_hud[index],
+            absolute_center[index],
+            absolute_visual[index],
+        ):
             continue
         accepted_indices.append(index)
         start = max(0.0, peak_time - config.pre_roll_seconds)
@@ -749,6 +801,47 @@ def _robust_normalize(values: np.ndarray) -> np.ndarray:
     spread = max(upper - lower, float(np.std(values)) * 0.5, 1e-6)
     normalized = (values - median) / spread
     return np.clip(normalized, -3.5, 4.0)
+
+
+def _absolute_presence_score(values: np.ndarray, floor: float, scale: float) -> np.ndarray:
+    values = np.asarray(values, dtype=np.float32)
+    if values.size == 0:
+        return values
+    normalized = (values - floor) / max(scale, 1e-6)
+    return np.clip(normalized, 0.0, 1.5)
+
+
+def _has_absolute_action_support(
+    killfeed_score: float,
+    audio_score: float,
+    hud_score: float,
+    center_score: float,
+    visual_score: float,
+) -> bool:
+    if killfeed_score >= 0.12:
+        return True
+    if audio_score >= 0.20 and max(hud_score, center_score, visual_score) >= 0.08:
+        return True
+    return False
+
+
+def _source_has_meaningful_gameplay(timeline: AnalysisTimeline) -> bool:
+    visual = np.array(timeline.visual_motion, dtype=np.float32)
+    killfeed = np.array(timeline.killfeed_motion, dtype=np.float32)
+    hud = np.array(timeline.hud_motion, dtype=np.float32)
+    center = np.array(timeline.center_motion, dtype=np.float32)
+    audio_flux = np.array(timeline.audio_flux, dtype=np.float32)
+    scene = np.array(timeline.scene_change, dtype=np.float32)
+
+    return bool(
+        np.percentile(visual, 95) >= 0.010
+        and np.percentile(center, 95) >= 0.010
+        and (
+            np.percentile(killfeed, 95) >= 0.020
+            or (np.percentile(audio_flux, 95) >= 0.080 and np.percentile(hud, 95) >= 0.010)
+            or np.percentile(scene, 95) >= 0.050
+        )
+    )
 
 
 def _smooth(values: np.ndarray, window_size: int) -> np.ndarray:

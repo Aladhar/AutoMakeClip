@@ -199,6 +199,26 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertFalse(candidates)
 
+    def test_rejects_menu_like_low_motion_source_even_if_relative_scores_spike(self) -> None:
+        timeline = AnalysisTimeline(
+            times=[float(index * 4) for index in range(8)],
+            visual_motion=[0.00001, 0.00001, 0.00002, 0.0008, 0.0027, 0.0007, 0.00002, 0.00001],
+            killfeed_motion=[0.0, 0.0, 0.0001, 0.0004, 0.0034, 0.0005, 0.0, 0.0],
+            hud_motion=[0.0, 0.0, 0.0001, 0.0005, 0.0023, 0.0008, 0.0, 0.0],
+            center_motion=[0.00001, 0.00002, 0.00003, 0.0008, 0.0033, 0.0010, 0.00002, 0.00001],
+            audio_rms=[0.003, 0.004, 0.005, 0.008, 0.015, 0.010, 0.004, 0.003],
+            audio_flux=[0.01, 0.02, 0.03, 0.05, 0.19, 0.08, 0.02, 0.01],
+            scene_change=[0.0, 0.0, 0.0, 0.002, 0.009, 0.004, 0.0, 0.0],
+            gameplay_confidence=[0.2, 0.4, 0.6, 8.0, 30.0, 12.0, 0.3, 0.2],
+            scores=[0.3, 0.5, 0.7, 50.0, 620.0, 180.0, 0.4, 0.3],
+            duration=32.0,
+        )
+        metadata = VideoMetadata(duration=32.0, width=1280, height=720, fps=60.0)
+
+        candidates = extract_candidate_segments(timeline, metadata, AnalysisConfig())
+
+        self.assertFalse(candidates)
+
     def test_extracts_borderline_review_segments_from_midband_activity(self) -> None:
         timeline = AnalysisTimeline(
             times=[0.0, 8.0, 16.0, 24.0, 32.0, 40.0, 48.0, 56.0, 64.0],

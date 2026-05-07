@@ -26,11 +26,14 @@ def select_global_segments(candidates: List[Segment], target_seconds: float, int
     selected: List[Segment] = []
     silly_used = False
     source_max_scores = _source_max_scores(candidates)
+    generic_score_floor = _generic_score_floor(candidates)
 
     for candidate in sorted(candidates, key=lambda segment: candidate_priority(segment, source_max_scores), reverse=True):
         if is_training_or_practice_candidate(candidate):
             continue
         if candidate.label == "silly" and silly_used:
+            continue
+        if _is_low_quality_filler(candidate, selected, generic_score_floor):
             continue
         if any(same_source_overlap(candidate, existing) > 0.60 for existing in selected):
             continue
@@ -168,3 +171,32 @@ def _source_max_scores(candidates: List[Segment]) -> Dict[str, float]:
         source_key = candidate.source_path or ""
         source_max[source_key] = max(source_max.get(source_key, 0.0), float(candidate.score))
     return source_max
+
+
+def _generic_score_floor(candidates: List[Segment]) -> float:
+    generic_scores = [
+        float(candidate.score)
+        for candidate in candidates
+        if _is_generic_or_fallback(candidate)
+    ]
+    if not generic_scores:
+        return 0.0
+    return max(generic_scores) * 0.75
+
+
+def _is_low_quality_filler(candidate: Segment, selected: List[Segment], generic_score_floor: float) -> bool:
+    if len(selected) < 2:
+        return False
+    if not _is_generic_or_fallback(candidate):
+        return False
+    return float(candidate.score) < generic_score_floor
+
+
+def _is_generic_or_fallback(candidate: Segment) -> bool:
+    note = (candidate.note or "").lower()
+    return (
+        "generic" in note
+        or "fallback" in note
+        or "active team-fight" in note
+        or "kill-feed heavy fight window" in note
+    )
