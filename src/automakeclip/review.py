@@ -48,16 +48,14 @@ def _add_review_candidates(
     metadata,
     timeline,
     config: AppConfig,
-    target_seconds: float,
     include_silly: bool,
 ) -> None:
-    from .analysis import pick_segments
+    from .analysis import collect_candidate_segments
 
-    file_segments, _ = pick_segments(
+    file_segments = collect_candidate_segments(
         timeline,
         metadata,
         config.analysis,
-        target_seconds=target_seconds,
         include_silly=include_silly,
     )
     for segment in file_segments:
@@ -97,8 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--youtube-playlist-limit",
         type=int,
-        default=24,
-        help="When an input is a YouTube /streams page, limit how many recent stream VODs are pulled in.",
+        default=0,
+        help="When an input is a YouTube /streams page, cap how many recent stream VODs are pulled in. Use 0 for no limit.",
     )
     return parser
 
@@ -131,7 +129,7 @@ def main() -> int:
             input_paths = resolve_inputs(
                 args.input,
                 download_root=Path.cwd() / ".automakeclip_downloads",
-                youtube_playlist_limit=max(1, args.youtube_playlist_limit),
+                youtube_playlist_limit=args.youtube_playlist_limit if args.youtube_playlist_limit > 0 else None,
             )
         cache_dir = Path.cwd() / config.cache.directory_name
         use_cache = config.cache.enabled and not args.no_cache
@@ -156,7 +154,6 @@ def main() -> int:
                     metadata,
                     timeline,
                     config,
-                    target_seconds=args.target_seconds,
                     include_silly=not args.no_silly,
                 )
         else:
@@ -183,7 +180,6 @@ def main() -> int:
                     metadata,
                     timeline,
                     config,
-                    target_seconds=args.target_seconds,
                     include_silly=not args.no_silly,
                 )
 

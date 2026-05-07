@@ -22,7 +22,7 @@ class YoutubeEntry:
     webpage_url: str
 
 
-def resolve_inputs(raw_inputs: List[List[str]], download_root: Path, youtube_playlist_limit: int = 24) -> List[Path]:
+def resolve_inputs(raw_inputs: List[List[str]], download_root: Path, youtube_playlist_limit: int | None = None) -> List[Path]:
     resolved: List[Path] = []
     seen = set()
     for group in raw_inputs:
@@ -58,7 +58,7 @@ def _iter_local_video_files(path: Path) -> List[Path]:
     )
 
 
-def _resolve_url_input(url: str, download_root: Path, youtube_playlist_limit: int) -> List[Path]:
+def _resolve_url_input(url: str, download_root: Path, youtube_playlist_limit: int | None) -> List[Path]:
     yt_dlp_command = _yt_dlp_command()
 
     urls = [url]
@@ -109,12 +109,11 @@ def _download_youtube_url(url: str, download_root: Path, yt_dlp_command: Sequenc
     return existing_mp4s
 
 
-def _list_youtube_entries(url: str, playlist_limit: int, yt_dlp_command: Sequence[str]) -> List[YoutubeEntry]:
+def _list_youtube_entries(url: str, playlist_limit: int | None, yt_dlp_command: Sequence[str]) -> List[YoutubeEntry]:
     command = [
         *yt_dlp_command,
         "--flat-playlist",
-        "--playlist-end",
-        str(playlist_limit),
+        *_playlist_end_args(playlist_limit),
         "--print",
         "%(title)s\t%(webpage_url)s",
         url,
@@ -147,6 +146,12 @@ def _filter_overwatch_entries(entries: Sequence[YoutubeEntry]) -> List[YoutubeEn
         if "overwatch" in entry.title.lower() or "ow2" in entry.title.lower()
     ]
     return filtered
+
+
+def _playlist_end_args(playlist_limit: int | None) -> List[str]:
+    if playlist_limit is None or playlist_limit <= 0:
+        return []
+    return ["--playlist-end", str(playlist_limit)]
 
 
 def looks_like_non_gameplay_source(path: Path) -> bool:

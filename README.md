@@ -63,7 +63,7 @@ automakeclip --input take.mp4 --output reel.mp4 --dry-run
 automakeclip --from-cache --output reel.mp4
 ```
 
-You can also pass YouTube URLs when `yt-dlp` is installed. If you pass a YouTube channel `/streams` page, the resolver looks for recent titles that mention `Overwatch` or `OW2`, downloads those VODs locally, and then analyzes the resulting MP4s.
+You can also pass YouTube URLs when `yt-dlp` is installed. If you pass a YouTube channel `/streams` page, the resolver looks for titles that mention `Overwatch` or `OW2`, downloads those VODs locally, and then analyzes the resulting MP4s. Stream-page resolution is unlimited by default; pass `--youtube-playlist-limit N` only when you explicitly want to cap how many recent VODs get pulled in.
 
 ## Review UI
 
@@ -119,8 +119,8 @@ you will get:
 
 The plan JSON is useful for tuning the cut logic if you want to iterate on the montage style.
 
-When you provide multiple inputs, the tool scores each recording separately, pools the best moments, and builds one final montage across all of them.
-Selection does not impose a one-clip-per-video limit; if one source recording contains multiple distinct strong moments, the montage may use multiple clips from that same video.
+When you provide multiple inputs, the tool analyzes each recording separately, pools the detected candidate moments, and builds one final montage across all of them.
+Selection does not impose a one-clip-per-video limit, and the candidate pool is not trimmed to a fixed per-video clip count before global selection. If one source recording contains many distinct strong moments, the montage may use as many of them as fit the final runtime.
 
 The tool also keeps a per-video analysis cache in `.automakeclip_cache/` so repeated runs over the same folder do not need to re-scan every MP4 unless the file or analysis settings changed.
 

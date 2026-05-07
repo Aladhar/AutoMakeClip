@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from automakeclip.analysis import _smooth, extract_borderline_review_segments, extract_candidate_segments
+from automakeclip.analysis import _smooth, collect_candidate_segments, extract_borderline_review_segments, extract_candidate_segments
 from automakeclip.config import AnalysisConfig
 from automakeclip.types import AnalysisTimeline, VideoMetadata
 
@@ -193,6 +193,30 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(borderline)
         self.assertTrue(all(item.note.startswith("Borderline discard candidate:") for item in borderline))
         self.assertTrue(any(item.highlight_time in {16.0, 48.0} for item in borderline))
+
+    def test_collect_candidate_segments_keeps_full_source_pool(self) -> None:
+        config = AnalysisConfig()
+        timeline = AnalysisTimeline(
+            times=[float(index * 5) for index in range(10)],
+            visual_motion=[0.1, 0.2, 0.85, 0.25, 0.2, 0.88, 0.22, 0.18, 0.92, 0.2],
+            killfeed_motion=[0.0, 0.1, 0.9, 0.12, 0.08, 0.95, 0.1, 0.08, 0.98, 0.1],
+            hud_motion=[0.08, 0.12, 0.75, 0.14, 0.12, 0.79, 0.13, 0.1, 0.82, 0.12],
+            center_motion=[0.07, 0.1, 0.72, 0.12, 0.1, 0.76, 0.11, 0.09, 0.8, 0.1],
+            audio_rms=[0.02, 0.04, 0.5, 0.05, 0.04, 0.48, 0.05, 0.03, 0.52, 0.04],
+            audio_flux=[0.01, 0.03, 0.55, 0.04, 0.03, 0.53, 0.04, 0.02, 0.57, 0.03],
+            scene_change=[0.01, 0.02, 0.25, 0.03, 0.02, 0.27, 0.03, 0.02, 0.29, 0.02],
+            gameplay_confidence=[-0.2, 0.0, 0.9, 0.05, 0.0, 0.92, 0.04, -0.05, 0.95, 0.0],
+            scores=[-0.1, 0.05, 1.1, 0.08, 0.02, 1.05, 0.07, 0.0, 1.0, 0.03],
+            duration=50.0,
+        )
+        metadata = VideoMetadata(duration=50.0, width=1920, height=1080, fps=60.0)
+
+        full_candidates = collect_candidate_segments(timeline, metadata, config, include_silly=False)
+
+        self.assertGreaterEqual(len(full_candidates), 3)
+        self.assertTrue(any(candidate.highlight_time == 10.0 for candidate in full_candidates))
+        self.assertTrue(any(candidate.highlight_time == 25.0 for candidate in full_candidates))
+        self.assertTrue(any(candidate.highlight_time == 40.0 for candidate in full_candidates))
 
 
 if __name__ == "__main__":

@@ -76,6 +76,19 @@ def pick_segments(timeline: AnalysisTimeline, metadata: VideoMetadata, config: A
     return selected, MontageProfile(mood=mood, target_bpm=target_bpm, silly_segment=silly_segment)
 
 
+def collect_candidate_segments(
+    timeline: AnalysisTimeline,
+    metadata: VideoMetadata,
+    config: AnalysisConfig,
+    include_silly: bool,
+) -> List[Segment]:
+    candidates = list(extract_candidate_segments(timeline, metadata, config))
+    silly_segment = _pick_silly_segment(timeline, metadata, config, []) if include_silly else None
+    if silly_segment is not None and not any(_overlap(silly_segment, candidate) > 0.45 for candidate in candidates):
+        candidates.append(silly_segment)
+    return sorted(candidates, key=lambda segment: (segment.start, segment.end, -segment.score))
+
+
 def extract_candidate_segments(timeline: AnalysisTimeline, metadata: VideoMetadata, config: AnalysisConfig) -> List[Segment]:
     event_candidates = _extract_event_segments(timeline, metadata, config)
     heuristic_candidates = _extract_heuristic_segments(timeline, metadata, config)
