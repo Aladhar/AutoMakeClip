@@ -200,6 +200,7 @@ If you care about drop-sync specifically, add `drop_times` to your `music_librar
 These are product notes and requested directions only. They are not implemented yet unless another section above already explicitly says they are.
 
 - After each implementation push, update the README so the current workflow and the next requested steps stay visible.
+- Consider integrating Eklipse.gg itself later if the local in-repo filter still trails the strength of Eklipse's own highlight selection.
 - Before a new automake render writes fresh output, clear the previous automake-generated output artifacts for that target render set instead of leaving stale reel files around. Scope this to prior automake outputs such as the rendered video, plan JSON, credits file, and related temp output for that render target rather than deleting arbitrary files in the folder.
 - Keep strengthening the automake path so automatic clip ranking, trimming, and sequencing factor in both deterministic detector scoring and persistent review memory from labels, trims, Clip Notes, and Session Notes.
 - Evolve Review UI toward a lightweight video-editing workflow, including draggable trim controls or a drag bar so clip in/out points can be adjusted directly during review.
