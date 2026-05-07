@@ -6,7 +6,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from automakeclip.config import MusicConfig
-from automakeclip.music import MusicSelectionError, resolve_music_manifest_path, select_music_track
+from automakeclip.music import (
+    MusicSelectionError,
+    _write_generated_track,
+    auto_detect_drop_times,
+    resolve_music_manifest_path,
+    select_music_track,
+)
 
 
 class MusicTests(unittest.TestCase):
@@ -53,6 +59,45 @@ class MusicTests(unittest.TestCase):
             self.assertEqual(track.source_kind, "youtube_audio_library")
             self.assertEqual(track.local_path, track_path)
             self.assertEqual(track.drop_times, [18.0, 25.5])
+
+    def test_library_track_auto_detects_drop_times_when_manifest_omits_them(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            music_dir = root / "music"
+            music_dir.mkdir()
+            track_path = music_dir / "detected.wav"
+            _write_generated_track(track_path, mood="aggro", bpm=150.0, duration_seconds=32.0)
+
+            manifest_path = root / "tracks.json"
+            manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "title": "Detected Track",
+                            "artist": "Auto",
+                            "license_name": "Test",
+                            "page_url": "local://test",
+                            "download_url": "local://test",
+                            "local_path": str(track_path),
+                            "bpm": 150,
+                            "tags": ["electronic", "gaming"],
+                            "source_kind": "library",
+                            "drop_times": [],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            track = select_music_track(
+                mood="aggro",
+                target_bpm=150.0,
+                output_dir=root / "output_music",
+                config=MusicConfig(source="library", library_manifest=str(manifest_path), allow_generated_fallback=False),
+            )
+
+            self.assertTrue(track.drop_times)
+            self.assertGreaterEqual(track.drop_times[0], 4.0)
 
     def test_bad_manifest_falls_back_only_when_explicitly_allowed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -126,7 +171,7 @@ class MusicTests(unittest.TestCase):
     def test_youtube_source_downloads_playlist_audio(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             root = Path(temp_root)
-            downloaded_path = root / "output_music" / "playlist.mp3"
+            downloaded_path = root / "output_music" / "playlist.wav"
             manifest_path = root / "tracks.json"
             manifest_path.write_text(
                 json.dumps(
@@ -147,7 +192,8 @@ class MusicTests(unittest.TestCase):
 
             def fake_download(track, output_dir, config):
                 output_dir.mkdir(parents=True, exist_ok=True)
-                downloaded_path.write_bytes(b"mp3")
+                downloaded_path = output_dir / "playlist.wav"
+                _write_generated_track(downloaded_path, mood="balanced", bpm=138.0, duration_seconds=32.0)
                 return downloaded_path
 
             with patch("automakeclip.music._download_youtube_audio", side_effect=fake_download):
@@ -161,6 +207,18 @@ class MusicTests(unittest.TestCase):
             self.assertEqual(track.title, "Stream Playlist")
             self.assertEqual(track.source_kind, "youtube_playlist")
             self.assertEqual(track.local_path, downloaded_path)
+            self.assertTrue(track.drop_times)
+
+    def test_auto_detect_drop_times_finds_generated_track_impacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            track_path = root / "generated.wav"
+            _write_generated_track(track_path, mood="balanced", bpm=138.0, duration_seconds=32.0)
+
+            drops = auto_detect_drop_times(track_path)
+
+            self.assertTrue(drops)
+            self.assertTrue(any(abs(drop - 6.95) < 2.0 for drop in drops))
 
     def test_spotify_manifest_without_local_audio_explains_requirement(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

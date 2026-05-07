@@ -16,6 +16,7 @@ import numpy as np
 from .config import MusicConfig
 from .inputs import _yt_dlp_command
 from .types import MusicTrack
+from .ffmpeg import extract_audio_samples
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -39,7 +40,10 @@ def select_music_track(mood: str, target_bpm: float, output_dir: Path, config: M
         if "spotify" in sources and "library" not in sources:
             library_tracks = [track for track in library_tracks if _is_spotify_track(track)]
         if library_tracks:
-            return max(library_tracks, key=lambda track: _local_track_score(track, mood, target_bpm))
+            selected = max(library_tracks, key=lambda track: _local_track_score(track, mood, target_bpm))
+            if selected.local_path:
+                _ensure_track_drop_times(selected, selected.local_path)
+            return selected
 
     if "youtube" in sources:
         try:
@@ -51,6 +55,12 @@ def select_music_track(mood: str, target_bpm: float, output_dir: Path, config: M
             try:
                 if candidate.local_path is None or not candidate.local_path.exists():
                     candidate.local_path = _download_youtube_audio(candidate, output_dir, config)
+                # Convert downloaded audio to WAV for more reliable analysis, then run detection.
+                try:
+                    analysis_path = _convert_to_wav(candidate.local_path, output_dir)
+                except MusicSelectionError:
+                    analysis_path = candidate.local_path
+                _ensure_track_drop_times(candidate, analysis_path)
                 return candidate
             except MusicSelectionError as error:
                 youtube_error = error
@@ -69,6 +79,7 @@ def select_music_track(mood: str, target_bpm: float, output_dir: Path, config: M
             try:
                 if not candidate.local_path.exists():
                     _download_file(candidate.download_url, candidate.local_path, timeout_seconds=config.download_timeout_seconds)
+                _ensure_track_drop_times(candidate, candidate.local_path)
                 return candidate
             except MusicSelectionError:
                 continue
@@ -331,6 +342,41 @@ def _download_file(url: str, destination: Path, timeout_seconds: int) -> None:
         raise MusicSelectionError(f"Unable to download music track: {error}") from error
 
 
+def _ensure_track_drop_times(track: MusicTrack, analysis_path: Path) -> None:
+    if track.drop_times:
+        return
+    detected = auto_detect_drop_times(analysis_path)
+    if detected:
+        track.drop_times = detected
+        return
+    duration_seconds = _audio_duration_seconds(analysis_path)
+    track.drop_times = _default_drop_times(track.bpm, duration_seconds=duration_seconds if duration_seconds > 0 else 96.0)
+
+
+def _convert_to_wav(input_path: Path, output_dir: Path) -> Path:
+    """Convert an audio file to WAV using ffmpeg; return the WAV path."""
+    wav_path = output_dir / (input_path.stem + ".wav")
+    if wav_path.exists():
+        return wav_path
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(input_path),
+                str(wav_path),
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise MusicSelectionError(f"Unable to convert audio to WAV: {error}") from error
+    return wav_path
+
+
 def _tags_for_mood(mood: str) -> List[str]:
     if mood == "aggro":
         return ["electronic", "hip_hop", "dance"]
@@ -358,7 +404,10 @@ def _resolved_sources(source: str) -> List[str]:
 
 def _local_track_score(track: MusicTrack, mood: str, target_bpm: float) -> float:
     tag_bonus = sum(1.0 for tag in track.tags if tag.lower() in _tags_for_mood(mood))
-    bpm_penalty = _track_distance(track, target_bpm)
+    bpm_penalty = 0.0
+    # De-emphasize BPM for YouTube tracks, as user-provided drop_times are often more important.
+    if not _is_youtube_track(track):
+        bpm_penalty = _track_distance(track, target_bpm)
     youtube_bonus = 8.0 if track.youtube_safe else 0.0
     source_bonus = 0.0
     if _is_spotify_track(track):
@@ -495,6 +544,144 @@ def _open_url(url: str, timeout_seconds: int):
 def _load_json(url: str, timeout_seconds: int):
     with _open_url(url, timeout_seconds=timeout_seconds) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def auto_detect_drop_times(audio_path: Path) -> List[float]:
+    """
+    Automated DSP Filter: Detects music drops via spectral flux and energy transients.
+    Replaces manual JSON entry by analyzing the actual audio waveform.
+    """
+    sample_rate = 22050
+    try:
+        samples = extract_audio_samples(audio_path, sample_rate)
+    except Exception:
+        return []
+    if samples.size < sample_rate * 4:
+        return []
+
+    samples = np.asarray(samples, dtype=np.float32)
+    peak = float(np.max(np.abs(samples))) or 0.0
+    if peak <= 1e-5:
+        return []
+    samples = samples / peak
+
+    window_size = 2048
+    hop_length = 512
+    if len(samples) < window_size + hop_length:
+        return []
+
+    frame_count = 1 + (len(samples) - window_size) // hop_length
+    window = np.hanning(window_size).astype(np.float32)
+    spectra = np.zeros((frame_count, window_size // 2 + 1), dtype=np.float32)
+    rms = np.zeros(frame_count, dtype=np.float32)
+
+    for index in range(frame_count):
+        start = index * hop_length
+        frame = samples[start : start + window_size]
+        if frame.shape[0] < window_size:
+            frame = np.pad(frame, (0, window_size - frame.shape[0]))
+        rms[index] = float(np.sqrt(np.mean(np.square(frame)) + 1e-10))
+        spectra[index] = np.abs(np.fft.rfft(frame * window))
+
+    flux = np.zeros(frame_count, dtype=np.float32)
+    if frame_count > 1:
+        diffs = spectra[1:] - spectra[:-1]
+        flux[1:] = np.maximum(diffs, 0.0).mean(axis=1)
+
+    frequencies = np.fft.rfftfreq(window_size, d=1.0 / sample_rate)
+    bass_mask = (frequencies >= 40.0) & (frequencies <= 180.0)
+    body_mask = (frequencies >= 180.0) & (frequencies <= 2000.0)
+    treble_mask = frequencies >= 3500.0
+    bass_energy = spectra[:, bass_mask].mean(axis=1) if np.any(bass_mask) else np.zeros(frame_count, dtype=np.float32)
+    body_energy = spectra[:, body_mask].mean(axis=1) if np.any(body_mask) else np.zeros(frame_count, dtype=np.float32)
+    treble_energy = spectra[:, treble_mask].mean(axis=1) if np.any(treble_mask) else np.zeros(frame_count, dtype=np.float32)
+
+    rms_smooth = _smooth_curve(rms, window_size=11)
+    bass_smooth = _smooth_curve(bass_energy, window_size=11)
+    body_smooth = _smooth_curve(body_energy, window_size=11)
+    treble_smooth = _smooth_curve(treble_energy, window_size=11)
+    flux_smooth = _smooth_curve(flux, window_size=5)
+
+    rms_jump = np.maximum(rms_smooth - _rolling_mean(rms_smooth, window_size=43), 0.0)
+    bass_jump = np.maximum(bass_smooth - _rolling_mean(bass_smooth, window_size=43), 0.0)
+    body_jump = np.maximum(body_smooth - _rolling_mean(body_smooth, window_size=43), 0.0)
+
+    novelty = (
+        0.38 * _zscore_like(flux_smooth)
+        + 0.24 * _zscore_like(rms_jump)
+        + 0.22 * _zscore_like(bass_jump)
+        + 0.10 * _zscore_like(body_jump)
+        + 0.06 * _zscore_like(treble_smooth)
+    )
+    absolute_energy = 0.65 * _zscore_like(rms_smooth) + 0.35 * _zscore_like(bass_smooth)
+
+    minimum_time = 4.0
+    spacing_seconds = 6.0
+    novelty_threshold = max(1.1, float(np.percentile(novelty, 87)))
+    energy_threshold = max(0.15, float(np.percentile(absolute_energy, 55)))
+
+    scored_candidates: List[tuple[float, float]] = []
+    for index in range(2, frame_count - 2):
+        if novelty[index] < novelty_threshold:
+            continue
+        if absolute_energy[index] < energy_threshold:
+            continue
+        if novelty[index] < novelty[index - 1] or novelty[index] < novelty[index + 1]:
+            continue
+        timestamp = (index * hop_length) / sample_rate
+        if timestamp < minimum_time:
+            continue
+        score = (
+            0.55 * float(novelty[index])
+            + 0.25 * float(absolute_energy[index])
+            + 0.20 * float(_zscore_like(bass_smooth)[index])
+        )
+        scored_candidates.append((timestamp, score))
+
+    if not scored_candidates:
+        return []
+
+    selected: List[float] = []
+    for timestamp, _ in sorted(scored_candidates, key=lambda item: item[1], reverse=True):
+        if any(abs(timestamp - existing) < spacing_seconds for existing in selected):
+            continue
+        selected.append(timestamp)
+        if len(selected) >= 8:
+            break
+
+    return [round(timestamp, 3) for timestamp in sorted(selected)]
+
+
+def _audio_duration_seconds(audio_path: Path, sample_rate: int = 22050) -> float:
+    try:
+        samples = extract_audio_samples(audio_path, sample_rate)
+    except Exception:
+        return 0.0
+    return float(samples.size) / float(sample_rate) if samples.size else 0.0
+
+
+def _smooth_curve(values: np.ndarray, window_size: int) -> np.ndarray:
+    if values.size == 0 or window_size <= 1:
+        return values.astype(np.float32, copy=False)
+    window_size = min(window_size, values.size)
+    kernel = np.ones(window_size, dtype=np.float32) / float(window_size)
+    return np.convolve(values, kernel, mode="same").astype(np.float32)
+
+
+def _rolling_mean(values: np.ndarray, window_size: int) -> np.ndarray:
+    if values.size == 0:
+        return values.astype(np.float32, copy=False)
+    window_size = max(3, min(window_size, values.size))
+    return _smooth_curve(values, window_size)
+
+
+def _zscore_like(values: np.ndarray) -> np.ndarray:
+    if values.size == 0:
+        return values.astype(np.float32, copy=False)
+    median = float(np.median(values))
+    spread = max(float(np.percentile(values, 75) - np.percentile(values, 25)), float(np.std(values)) * 0.5, 1e-6)
+    normalized = (values - median) / spread
+    return np.clip(normalized.astype(np.float32), -3.0, 5.0)
 
 
 def _synthesize_fallback_track(mood: str, target_bpm: float, output_dir: Path) -> MusicTrack:
