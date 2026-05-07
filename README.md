@@ -1,13 +1,12 @@
 # AutoMakeClip
 
 AutoMakeClip turns a long Overwatch gameplay recording into a tighter highlight reel:
-
+- uses an Eklipse-style highlight filter implemented in this repo
 - finds kill-heavy and fight-heavy moments from one or more source MP4s
 - boosts kill-feed and action-heavy sections
 - prefers embedded SteelSeries / GameSense kill events when they exist
-- inserts a short stylized intro
 - prefers real licensed music you supply locally, with generated fallback only when you explicitly allow it
-- aligns clip lengths toward the chosen track's beat grid
+- aligns clip lengths toward the chosen track's beat grid (making them synchronous with music)
 - exports a higher-fidelity final montage MP4 plus a credits file for the music
 
 The goal is the vibe you described: compact gameplay cuts, a quick intro, some silly chaos, and the strongest highlight moments.
@@ -15,6 +14,9 @@ The goal is the vibe you described: compact gameplay cuts, a quick intro, some s
 ## How It Works
 
 The current version is Overwatch-aware and uses a hybrid selection flow:
+
+- it does not call Eklipse.gg or use Eklipse's proprietary backend
+- instead, it implements an Eklipse-style scoring pipeline locally in Python and `ffmpeg`
 
 - embedded SteelSeries / GameSense kill timestamps when present
 - visual motion from low-FPS analysis frames
@@ -24,6 +26,24 @@ The current version is Overwatch-aware and uses a hybrid selection flow:
 - audio RMS and spectral flux to rank hype around real fight windows
 
 It does not need manual timestamps.
+
+### Eklipse-Style Filter
+
+What `Eklipse-style` means here:
+
+- the system ranks short gameplay windows instead of requiring manual timestamps
+- kill-confirmed windows are tiered above generic motion-heavy windows
+- fallback fight detection still works when event metadata is missing
+- overlap suppression and duplicate-capture suppression try to avoid near-identical clips
+- final clip selection pools candidates globally so one strong VOD can contribute multiple highlights
+- review memory can later boost, downrank, or retrim similar clips based on prior labels and notes
+
+Where that behavior currently lives:
+
+- [analysis.py](src/automakeclip/analysis.py) extracts and scores candidate highlight windows
+- [selection.py](src/automakeclip/selection.py) tiers and selects the final clip pool
+- [memory.py](src/automakeclip/memory.py) applies persistent review-memory boosts, downranks, and trim adjustments
+- [cli.py](src/automakeclip/cli.py) runs the end-to-end automake flow over local files or YouTube inputs
 
 ## Requirements
 
@@ -69,6 +89,7 @@ You can also pass YouTube URLs when `yt-dlp` is installed. If you pass a YouTube
 
 To calibrate what counts as a good clip, generate sample clips and review them in a tiny yes/no UI:
 
+
 ```bash
 automakeclip-review \
   --input "/path/to/Videos" \
@@ -94,7 +115,7 @@ The review app:
 - renders short sample clips from the current detector
 - lets you mark each one `yes`, `no`, or `skip`
 - saves your decisions to `labels.json` in the session folder
-- saves review memory to `review_sessions/review_memory.json` so future runs can boost similar accepted clips, downrank rejected patterns, and reuse learned trim offsets
+- saves review memory to `review_sessions/review_memory.json` so future runs can boost similar accepted clips, downrank rejected patterns, and reuse learned trim offsets.
 - reads saved Clip Notes and Session Notes as editing guidance, so notes like `too long`, `start later`, `more multi-kills`, `no generic filler`, or `more aftermath` influence future clip scoring and trim choices
 - shows a bottom-right readout for the current clip so you can see the score, bucket, memory effects, and note directives the tool understood
 - can finish the review and automatically render a final montage from the full detected candidate pool, using accepted/rejected review clips as guidance
@@ -173,6 +194,18 @@ automakeclip \
 ```
 
 If you care about drop-sync specifically, add `drop_times` to your `music_library/tracks.json` entries. Those should be the song timestamps where the main drop or major impact moments happen, and the renderer will shift the song so those moments line up with the strongest gameplay beats.
+
+## Requested Future Work
+
+These are product notes and requested directions only. They are not implemented yet unless another section above already explicitly says they are.
+
+- After each implementation push, update the README so the current workflow and the next requested steps stay visible.
+- Before a new automake render writes fresh output, clear the previous automake-generated output artifacts for that target render set instead of leaving stale reel files around. Scope this to prior automake outputs such as the rendered video, plan JSON, credits file, and related temp output for that render target rather than deleting arbitrary files in the folder.
+- Keep strengthening the automake path so automatic clip ranking, trimming, and sequencing factor in both deterministic detector scoring and persistent review memory from labels, trims, Clip Notes, and Session Notes.
+- Evolve Review UI toward a lightweight video-editing workflow, including draggable trim controls or a drag bar so clip in/out points can be adjusted directly during review.
+- Add a random music mode that can draw from the provided YouTube Music playlist: `https://music.youtube.com/playlist?list=PLaysoNAQ0qMiqX9N9-7TJEydj_MoKTvi0`.
+- Support per-song customization notes so each track can record where the beat drops happen, which sections are treble-heavy, which sections have strong bass drops, and any other sync-relevant structure that should affect clip placement.
+- Use song-aware clip sizing and repositioning so clips can be moved to different parts of a selected track and aligned more intentionally with drops, impact beats, and texture changes in the music.
 
 ## Notes
 
