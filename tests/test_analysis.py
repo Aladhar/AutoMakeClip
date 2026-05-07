@@ -260,10 +260,29 @@ class AnalysisTests(unittest.TestCase):
 
         full_candidates = collect_candidate_segments(timeline, metadata, config, include_silly=False)
 
-        self.assertGreaterEqual(len(full_candidates), 3)
-        self.assertTrue(any(candidate.highlight_time == 10.0 for candidate in full_candidates))
-        self.assertTrue(any(candidate.highlight_time == 25.0 for candidate in full_candidates))
-        self.assertTrue(any(candidate.highlight_time == 40.0 for candidate in full_candidates))
+        self.assertGreaterEqual(len(full_candidates), 2)
+        self.assertTrue(all("Generic kill-heavy peak window." in candidate.note for candidate in full_candidates))
+        self.assertTrue(all(candidate.duration <= 4.2 for candidate in full_candidates))
+
+    def test_eventless_generic_path_rejects_sustained_ui_churn_without_kill_burst(self) -> None:
+        timeline = AnalysisTimeline(
+            times=[float(index * 4) for index in range(8)],
+            visual_motion=[0.12, 0.14, 0.16, 0.18, 0.17, 0.16, 0.14, 0.12],
+            killfeed_motion=[0.18, 0.19, 0.18, 0.19, 0.18, 0.19, 0.18, 0.18],
+            hud_motion=[0.16, 0.17, 0.18, 0.17, 0.18, 0.17, 0.16, 0.16],
+            center_motion=[0.15, 0.16, 0.17, 0.17, 0.16, 0.17, 0.16, 0.15],
+            audio_rms=[0.01] * 8,
+            audio_flux=[0.0] * 8,
+            scene_change=[0.22, 0.24, 0.26, 0.28, 0.26, 0.24, 0.22, 0.2],
+            gameplay_confidence=[0.35, 0.4, 0.45, 0.5, 0.48, 0.44, 0.4, 0.36],
+            scores=[0.2, 0.28, 0.32, 0.36, 0.34, 0.3, 0.25, 0.2],
+            duration=32.0,
+        )
+        metadata = VideoMetadata(duration=32.0, width=1920, height=1080, fps=60.0)
+
+        candidates = extract_candidate_segments(timeline, metadata, AnalysisConfig())
+
+        self.assertFalse(candidates)
 
 
 if __name__ == "__main__":

@@ -62,6 +62,7 @@ class RenderConfig:
     intro_title: str = "OVERWATCH HIGHLIGHTS"
     intro_subtitle: str = "big plays, chaos, and one goofy moment"
     beat_snap_tolerance_seconds: float = 0.40
+    transition_seconds: float = 0.22
 
 
 @dataclass

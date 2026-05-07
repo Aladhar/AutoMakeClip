@@ -24,7 +24,7 @@ class MontageProfile:
 
 
 def analyze_gameplay(source_path, metadata: VideoMetadata, config: AnalysisConfig) -> AnalysisTimeline:
-    frame_times, visual_motion, killfeed_motion, hud_motion, center_motion, scene_change = _analyze_frames(source_path, metadata, config)
+    frame_times, visual_motion, killfeed_motion, hud_motion, center_motion, scene_change, inactive_prompt = _analyze_frames(source_path, metadata, config)
     audio_rms, audio_flux = _analyze_audio(source_path, metadata.duration, config)
 
     timeline_times = frame_times
@@ -37,6 +37,10 @@ def analyze_gameplay(source_path, metadata: VideoMetadata, config: AnalysisConfi
         + 0.12 * _absolute_presence_score(killfeed_motion, floor=0.020, scale=0.120)
         + 0.08 * _absolute_presence_score(scene_change, floor=0.030, scale=0.240)
     )
+    inactive_penalty = (
+        0.62 * _absolute_presence_score(inactive_prompt, floor=0.025, scale=0.090)
+        + 0.38 * np.clip(_robust_normalize(inactive_prompt), 0.0, None)
+    )
     gameplay_confidence = _smooth(
         0.46 * _robust_normalize(center_motion)
         + 0.30 * _robust_normalize(hud_motion)
@@ -44,6 +48,7 @@ def analyze_gameplay(source_path, metadata: VideoMetadata, config: AnalysisConfi
         + 0.60 * absolute_presence,
         max(3, config.score_smoothing_frames - 1),
     )
+    gameplay_confidence = gameplay_confidence - 0.95 * inactive_penalty
 
     weighted = (
         config.weights["visual_motion"] * _robust_normalize(visual_motion)
@@ -55,7 +60,10 @@ def analyze_gameplay(source_path, metadata: VideoMetadata, config: AnalysisConfi
         + config.weights["scene_change"] * _robust_normalize(scene_change)
     )
     synergy = np.clip(_robust_normalize(killfeed_motion), 0, None) * np.clip(_robust_normalize(audio_flux), 0, None) * 0.15
-    smoothed = _smooth(weighted + synergy + 0.10 * np.clip(gameplay_confidence, 0, None), config.score_smoothing_frames)
+    smoothed = _smooth(
+        weighted + synergy + 0.10 * np.clip(gameplay_confidence, 0, None) - 0.75 * inactive_penalty,
+        config.score_smoothing_frames,
+    )
 
     return AnalysisTimeline(
         times=timeline_times.tolist(),
@@ -69,6 +77,7 @@ def analyze_gameplay(source_path, metadata: VideoMetadata, config: AnalysisConfi
         gameplay_confidence=gameplay_confidence.tolist(),
         scores=smoothed.tolist(),
         duration=metadata.duration,
+        inactive_overlay=inactive_prompt.tolist(),
     )
 
 
@@ -102,50 +111,11 @@ def extract_candidate_segments(timeline: AnalysisTimeline, metadata: VideoMetada
         return []
 
     event_candidates = _extract_event_segments(timeline, metadata, config)
-    heuristic_candidates = _extract_heuristic_segments(timeline, metadata, config)
-
     if event_candidates:
-        candidates = list(event_candidates)
-        fallback_added = 0
-        for candidate in sorted(heuristic_candidates, key=lambda item: item.score, reverse=True):
-            if fallback_added >= config.fallback_fight_quota:
-                break
-            if any(_overlap(candidate, event_candidate) > 0.45 for event_candidate in event_candidates):
-                continue
-            candidates.append(
-                Segment(
-                    start=candidate.start,
-                    end=candidate.end,
-                    score=candidate.score * 0.88,
-                    label="fight",
-                    note="High-action fallback window without a logged kill event.",
-                    highlight_time=candidate.highlight_time,
-                )
-            )
-            fallback_added += 1
-        return candidates
+        return list(event_candidates)
 
     generic_peak_candidates = _extract_generic_peak_segments(timeline, metadata, config)
-    candidates = list(generic_peak_candidates)
-    fallback_quota = max(config.fallback_fight_quota, 2 if generic_peak_candidates else 3)
-    fallback_added = 0
-    for candidate in sorted(heuristic_candidates, key=lambda item: item.score, reverse=True):
-        if fallback_added >= fallback_quota:
-            break
-        if any(_overlap(candidate, existing) > 0.45 for existing in candidates):
-            continue
-        candidates.append(
-            Segment(
-                start=candidate.start,
-                end=candidate.end,
-                score=candidate.score * 0.90,
-                label=candidate.label,
-                note="Fallback active team-fight window without logged kill events.",
-                highlight_time=candidate.highlight_time,
-            )
-        )
-        fallback_added += 1
-    return candidates or heuristic_candidates
+    return list(generic_peak_candidates)
 
 
 def extract_borderline_review_segments(
@@ -318,6 +288,7 @@ def _analyze_frames(source_path, metadata: VideoMetadata, config: AnalysisConfig
     hud: List[float] = []
     center: List[float] = []
     scene: List[float] = []
+    inactive_prompt: List[float] = []
     times: List[float] = []
 
     previous_gray = None
@@ -333,6 +304,7 @@ def _analyze_frames(source_path, metadata: VideoMetadata, config: AnalysisConfig
         hud.append(float(_roi(diff, config.hud_roi).mean()))
         center.append(float(_roi(diff, config.center_roi).mean()))
         scene.append(float(np.percentile(diff, 95)))
+        inactive_prompt.append(_inactive_overlay_score(frame))
         times.append(time_seconds)
         previous_gray = gray
 
@@ -346,6 +318,7 @@ def _analyze_frames(source_path, metadata: VideoMetadata, config: AnalysisConfig
         np.array(hud, dtype=np.float32),
         np.array(center, dtype=np.float32),
         np.array(scene, dtype=np.float32),
+        np.array(inactive_prompt, dtype=np.float32),
     )
 
 
@@ -570,6 +543,8 @@ def _extract_generic_peak_segments(timeline: AnalysisTimeline, metadata: VideoMe
     hud = np.array(timeline.hud_motion, dtype=np.float32)
     audio_flux = np.array(timeline.audio_flux, dtype=np.float32)
     scenes = np.array(timeline.scene_change, dtype=np.float32)
+    inactive_overlay = np.array(getattr(timeline, "inactive_overlay", []) or [], dtype=np.float32)
+    inactive_overlay = _fit_to_length(inactive_overlay, len(times))
 
     positive_killfeed = np.clip(_robust_normalize(killfeed), 0.0, None)
     positive_audio = np.clip(_robust_normalize(audio_flux), 0.0, None)
@@ -577,22 +552,38 @@ def _extract_generic_peak_segments(timeline: AnalysisTimeline, metadata: VideoMe
     positive_hud = np.clip(_robust_normalize(hud), 0.0, None)
     positive_scene = np.clip(_robust_normalize(scenes), 0.0, None)
     positive_scores = np.clip(_robust_normalize(scores), 0.0, None)
+    killfeed_burst = _local_burst_signal(killfeed, radius=3)
+    center_burst = _local_burst_signal(center, radius=3)
+    positive_killfeed_burst = np.clip(_robust_normalize(killfeed_burst), 0.0, None)
+    positive_center_burst = np.clip(_robust_normalize(center_burst), 0.0, None)
     absolute_killfeed = _absolute_presence_score(killfeed, floor=0.020, scale=0.120)
+    absolute_killfeed_burst = _absolute_presence_score(killfeed_burst, floor=0.010, scale=0.060)
     absolute_hud = _absolute_presence_score(hud, floor=0.010, scale=0.080)
     absolute_center = _absolute_presence_score(center, floor=0.010, scale=0.080)
+    absolute_center_burst = _absolute_presence_score(center_burst, floor=0.010, scale=0.060)
     absolute_visual = _absolute_presence_score(np.array(timeline.visual_motion, dtype=np.float32), floor=0.010, scale=0.080)
     absolute_audio = _absolute_presence_score(audio_flux, floor=0.050, scale=0.300)
+    absolute_scene = _absolute_presence_score(scenes, floor=0.030, scale=0.240)
+    absolute_inactive = _absolute_presence_score(inactive_overlay, floor=0.025, scale=0.090)
+    positive_inactive = np.clip(_robust_normalize(inactive_overlay), 0.0, None)
+    activity_signal = (
+        0.42 * positive_killfeed
+        + 0.22 * positive_killfeed_burst
+        + 0.18 * positive_center
+        + 0.10 * positive_center_burst
+        + 0.08 * positive_scores
+    )
 
     generic_signal = (
-        0.33 * positive_killfeed
-        + 0.21 * positive_audio
-        + 0.16 * positive_center
-        + 0.12 * positive_hud
-        + 0.10 * positive_scene
+        0.34 * positive_killfeed
+        + 0.22 * positive_killfeed_burst
+        + 0.15 * positive_center
+        + 0.11 * positive_center_burst
+        + 0.10 * positive_audio
         + 0.08 * positive_scores
     )
     threshold = np.percentile(generic_signal, config.generic_peak_threshold_percentile)
-    gameplay_floor = np.percentile(gameplay, 60)
+    gameplay_floor = np.percentile(gameplay, 66)
     candidate_indices: List[int] = []
     for index, value in enumerate(generic_signal):
         if value < threshold or gameplay[index] < gameplay_floor:
@@ -612,28 +603,39 @@ def _extract_generic_peak_segments(timeline: AnalysisTimeline, metadata: VideoMe
         signal_votes = sum(
             [
                 positive_killfeed[index] >= 0.55,
-                positive_audio[index] >= 0.45,
-                positive_hud[index] >= 0.45,
+                positive_killfeed_burst[index] >= 0.55,
                 positive_center[index] >= 0.45,
+                positive_center_burst[index] >= 0.45,
                 positive_scores[index] >= 0.55,
             ]
         )
         if signal_votes < 2:
             continue
-        if positive_killfeed[index] < 0.35 and positive_audio[index] < 0.35:
+        # Loosen killfeed presence requirement to improve recall on eventless
+        # sources while still requiring multiple signal votes for acceptance.
+        if positive_killfeed[index] < 0.38:
             continue
-        if not _has_absolute_action_support(
+        if absolute_inactive[index] >= 0.18 or positive_inactive[index] >= 0.60:
+            continue
+        if not _has_eklipse_style_big_play_support(
             absolute_killfeed[index],
+            absolute_killfeed_burst[index],
             absolute_audio[index],
-            absolute_hud[index],
             absolute_center[index],
+            absolute_center_burst[index],
+            absolute_hud[index],
             absolute_visual[index],
+            absolute_scene[index],
         ):
             continue
         accepted_indices.append(index)
-        start = max(0.0, peak_time - config.pre_roll_seconds)
-        end = min(metadata.duration, peak_time + config.post_roll_seconds)
-        start, end = _clamp_segment(start, end, metadata.duration, config)
+        start, end = _big_play_segment_bounds(
+            peak_index=index,
+            times=times,
+            activity_signal=activity_signal,
+            duration=metadata.duration,
+            config=config,
+        )
         peak_strength = float(generic_signal[index])
         label = "highlight" if (positive_killfeed[index] + 0.7 * positive_audio[index] + 0.35 * positive_hud[index]) >= 1.45 else "fight"
         note = "Generic kill-heavy peak window." if label == "highlight" else "Generic high-activity fight window."
@@ -791,6 +793,73 @@ def _roi(frame: np.ndarray, roi: Tuple[float, float, float, float]) -> np.ndarra
     return frame[y0:y1, x0:x1]
 
 
+def _change_hero_prompt_score(frame: np.ndarray) -> float:
+    prompt = _roi(frame.astype(np.float32) / 255.0, (0.39, 0.86, 0.24, 0.12))
+    if prompt.size == 0:
+        return 0.0
+    return _orange_ui_ratio(prompt)
+
+
+def _death_spectating_score(frame: np.ndarray) -> float:
+    prompt = _roi(frame.astype(np.float32) / 255.0, (0.02, 0.03, 0.34, 0.17))
+    if prompt.size == 0:
+        return 0.0
+    return _orange_ui_ratio(prompt)
+
+
+def _scoreboard_overlay_score(frame: np.ndarray) -> float:
+    normalized = frame.astype(np.float32) / 255.0
+    tabs = _roi(normalized, (0.02, 0.03, 0.26, 0.11))
+    panel = _roi(normalized, (0.14, 0.18, 0.72, 0.60))
+    if tabs.size == 0 or panel.size == 0:
+        return 0.0
+
+    orange_tabs = _orange_ui_ratio(tabs)
+    blue_mask = (
+        (tabs[..., 2] >= 0.34)
+        & (tabs[..., 1] >= 0.24)
+        & (tabs[..., 0] <= 0.24)
+    )
+    tabs_score = 0.55 * orange_tabs + 0.45 * float(blue_mask.mean())
+
+    brightness = panel.mean(axis=2)
+    saturation = np.max(panel, axis=2) - np.min(panel, axis=2)
+    white_mask = (brightness >= 0.72) & (saturation <= 0.16)
+    teal_mask = (
+        (panel[..., 1] >= 0.35)
+        & (panel[..., 2] >= 0.35)
+        & (panel[..., 0] <= 0.28)
+    )
+    red_mask = (
+        (panel[..., 0] >= 0.35)
+        & (panel[..., 1] <= 0.28)
+        & (panel[..., 2] <= 0.28)
+    )
+    panel_score = 0.55 * float(white_mask.mean()) + 0.25 * float(teal_mask.mean()) + 0.20 * float(red_mask.mean())
+    return 0.55 * tabs_score + 0.45 * panel_score
+
+
+def _inactive_overlay_score(frame: np.ndarray) -> float:
+    change_hero = _change_hero_prompt_score(frame)
+    death_spectating = _death_spectating_score(frame)
+    scoreboard = _scoreboard_overlay_score(frame)
+    return max(change_hero, death_spectating, scoreboard)
+
+
+def _orange_ui_ratio(region: np.ndarray) -> float:
+    red = region[..., 0]
+    green = region[..., 1]
+    blue = region[..., 2]
+    orange_mask = (
+        (red >= 0.48)
+        & (green >= 0.18)
+        & (green <= 0.62)
+        & (blue <= 0.24)
+        & ((red - green) >= 0.12)
+    )
+    return float(orange_mask.mean())
+
+
 def _robust_normalize(values: np.ndarray) -> np.ndarray:
     values = np.array(values, dtype=np.float32)
     if values.size == 0:
@@ -825,23 +894,97 @@ def _has_absolute_action_support(
     return False
 
 
+def _has_eklipse_style_big_play_support(
+    killfeed_score: float,
+    killfeed_burst_score: float,
+    audio_score: float,
+    center_score: float,
+    center_burst_score: float,
+    hud_score: float,
+    visual_score: float,
+    scene_score: float,
+) -> bool:
+    if killfeed_score < 0.18:
+        return False
+    if killfeed_burst_score < 0.08 and center_burst_score < 0.08:
+        return False
+    if killfeed_burst_score >= 0.16 and max(center_score, center_burst_score, visual_score) >= 0.08:
+        return True
+    if killfeed_score >= 0.32 and center_burst_score >= 0.10:
+        return True
+    if killfeed_burst_score >= 0.22 and max(audio_score, scene_score) >= 0.12 and center_score >= 0.08:
+        return True
+    return False
+
+
 def _source_has_meaningful_gameplay(timeline: AnalysisTimeline) -> bool:
     visual = np.array(timeline.visual_motion, dtype=np.float32)
     killfeed = np.array(timeline.killfeed_motion, dtype=np.float32)
     hud = np.array(timeline.hud_motion, dtype=np.float32)
     center = np.array(timeline.center_motion, dtype=np.float32)
     audio_flux = np.array(timeline.audio_flux, dtype=np.float32)
-    scene = np.array(timeline.scene_change, dtype=np.float32)
+    killfeed_burst = _local_burst_signal(killfeed, radius=4)
 
     return bool(
-        np.percentile(visual, 95) >= 0.010
-        and np.percentile(center, 95) >= 0.010
+        np.percentile(visual, 95) >= 0.012
+        and np.percentile(center, 95) >= 0.012
         and (
-            np.percentile(killfeed, 95) >= 0.020
-            or (np.percentile(audio_flux, 95) >= 0.080 and np.percentile(hud, 95) >= 0.010)
-            or np.percentile(scene, 95) >= 0.050
+            np.percentile(killfeed_burst, 95) >= 0.014
+            or (
+                np.percentile(killfeed, 95) >= 0.028
+                and np.percentile(center, 95) >= 0.050
+            )
+            or (
+                np.percentile(audio_flux, 95) >= 0.080
+                and np.percentile(killfeed, 90) >= 0.016
+                and np.percentile(hud, 95) >= 0.012
+            )
         )
     )
+
+
+def _big_play_segment_bounds(
+    peak_index: int,
+    times: np.ndarray,
+    activity_signal: np.ndarray,
+    duration: float,
+    config: AnalysisConfig,
+) -> Tuple[float, float]:
+    peak_time = float(times[peak_index])
+    floor = max(0.42, float(activity_signal[peak_index]) * 0.46)
+    left = peak_index
+    right = peak_index
+
+    while left > 0 and (peak_time - float(times[left - 1])) <= 1.35 and float(activity_signal[left - 1]) >= floor:
+        left -= 1
+    while right + 1 < len(times) and (float(times[right + 1]) - peak_time) <= 2.05 and float(activity_signal[right + 1]) >= floor:
+        right += 1
+
+    start = max(0.0, float(times[left]) - 0.55)
+    end = min(duration, float(times[right]) + 0.90)
+    segment_duration = end - start
+    max_big_play_seconds = min(config.max_segment_seconds, 4.2)
+    if segment_duration > max_big_play_seconds:
+        half = max_big_play_seconds / 2.0
+        start = max(0.0, peak_time - half * 0.9)
+        end = min(duration, peak_time + half * 1.1)
+    return _clamp_segment(start, end, duration, config)
+
+
+def _local_burst_signal(values: np.ndarray, radius: int = 3) -> np.ndarray:
+    values = np.asarray(values, dtype=np.float32)
+    if values.size == 0:
+        return values
+    burst = np.zeros_like(values)
+    for index in range(values.size):
+        left = max(0, index - radius)
+        right = min(values.size, index + radius + 1)
+        neighborhood = values[left:right]
+        if neighborhood.size <= 1:
+            continue
+        baseline = float(np.median(np.delete(neighborhood, min(index - left, neighborhood.size - 1))))
+        burst[index] = max(float(values[index]) - baseline, 0.0)
+    return burst
 
 
 def _smooth(values: np.ndarray, window_size: int) -> np.ndarray:

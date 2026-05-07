@@ -1,7 +1,7 @@
 # AutoMakeClip
 
 AutoMakeClip turns a long Overwatch gameplay recording into a tighter highlight reel:
-- uses an Eklipse-style highlight filter implemented in this repo
+- uses an Eklipse.gg-style highlight filter implemented in this repo
 - finds kill-heavy and fight-heavy moments from one or more source MP4s
 - boosts kill-feed and action-heavy sections
 - prefers embedded SteelSeries / GameSense kill events when they exist
@@ -10,6 +10,14 @@ AutoMakeClip turns a long Overwatch gameplay recording into a tighter highlight 
 - exports a higher-fidelity final montage MP4 plus a credits file for the music
 
 The goal is the vibe you described: compact gameplay cuts, a quick intro, some silly chaos, and the strongest highlight moments.
+
+## SteelSeries-Style Auto-Clipping
+
+This tool aims to replicate and improve upon the **SteelSeries GG / Moments** experience:
+- **Auto-Event Detection**: Instead of manual clipping, the tool uses "ScreenSense"—a combination of OCR, ROI color analysis, and audio transient detection—to find "Eliminated" text or "Dink" sounds.
+- **Intelligent Buffering**: Like SteelSeries, it applies pre-roll (setup) and post-roll (reaction) to events, but it uses the **Review Memory** to learn exactly how much lead-in *you* prefer.
+- **Rhythmic Sequencing**: Unlike raw clips saved by SteelSeries, this tool automatically sequences those "Moments" into a produced montage, synced to your music choice.
+- **Game Agnostic**: While currently tuned for Overwatch, the architecture is moving toward a JSON-based "Game Profile" system (see `generic_clipper_brainstorm.py`).
 
 ## How It Works
 
@@ -87,7 +95,7 @@ You can also pass YouTube URLs when `yt-dlp` is installed. If you pass a YouTube
 
 ## Review UI
 
-To calibrate what counts as a good clip, generate sample clips and review them in a tiny yes/no UI:
+To calibrate what counts as a good clip, generate sample clips and review them in a DaVinci Resolve–style review UI:
 
 
 ```bash
@@ -112,7 +120,7 @@ This creates a review session in `review_sessions/` and starts a local UI at `ht
 
 The review app:
 
-- renders short sample clips from the current detector
+- **Renders "untouched" clips**: The UI shows raw segments directly from the detector/memory. These are **not** yet snapped to music beats or drops, allowing you to evaluate the core detection accuracy without the "polish" of the final render.
 - lets you mark each one `yes`, `no`, or `skip`
 - saves your decisions to `labels.json` in the session folder
 - saves review memory to `review_sessions/review_memory.json` so future runs can boost similar accepted clips, downrank rejected patterns, and reuse learned trim offsets.
@@ -121,6 +129,8 @@ The review app:
 - can finish the review and automatically render a final montage from the full detected candidate pool, using accepted/rejected review clips as guidance
 - selects soundtrack music automatically through the normal music picker when it builds that montage
 - works with local MP4s, folders, or YouTube URLs when `yt-dlp` is available
+
+- DaVinci Resolve-style: the review UI is intended to mimic the quick, editable workflow found in tools like DaVinci Resolve, which can automatically detect beats and help sync visuals to music.
 
 The current learning loop is not a neural ML model. It is deterministic detector scoring plus persistent review memory from your labels, trims, Clip Notes, and Session Notes.
 
@@ -172,6 +182,29 @@ The picker aims for:
 
 The exact track is chosen automatically from the reel's detected pace.
 
+### Music Alignment Implementation
+
+The tool uses a three-stage pipeline to ensure clips feel "produced" rather than just cut:
+
+1.  **Montage Profiling**: The tool analyzes the density of highlights and silly segments. High-intensity reels (many kills, short durations) trigger the `aggro` profile (~160 BPM), while slower reels use `balanced` (~138 BPM).
+2.  **Beat Snapping**: In `render.py`, the `snap_segments_to_beats` function calculates the nearest musical "bar" (4, 8, or 16 beats) for every segment. It adjusts the start/end points of your clips so that cuts occur exactly on a beat.
+3.  **Drop Synchronization**: If a track in your manifest has `drop_times` (seconds where the beat "drops"), the tool uses an alignment algorithm. It finds the strongest gameplay "anchors" (like a Triple Kill) and slides the music start time so a musical drop hits exactly when the kill feed lights up.
+
+    *Note: The tool now uses an automated DSP filter to detect `drop_times` by analyzing spectral flux if they are not provided manually in the manifest.*
+
+
+This logic ensures that even with different music, the gameplay remains the "driver" of the edit.
+
+### Modern Aesthetic Goals
+
+Inspired by high-tier manual montages, the "Modern" mode (currently in brainstorm) aims for:
+- **Impact Alignment**: Not just snapping cuts to beats, but aligning gameplay *sound events* (headshots, ultimates) to musical transients.
+- **Zero-Waste Cutting**: Aggressive removal of any frame that doesn't contribute to the "hype" or "story" of the clip.
+- **Hook-First Sequencing**: Ensuring the highest-scoring highlight appears within the first 5 seconds to maximize viewer retention.
+- **Spatial Detection**: Using multiple ROIs (Health, Kill-feed, Crosshair) to verify the player was actually the one contributing to the action.
+
+---
+
 For YouTube-safe publishing, prefer tracks you downloaded from YouTube Audio Library or music you separately licensed through YouTube Creator Music and list them in the manifest with their local file paths.
 
 Example:
@@ -193,8 +226,7 @@ automakeclip \
   --allow-generated-fallback
 ```
 
-If you care about drop-sync specifically, add `drop_times` to your `music_library/tracks.json` entries. Those should be the song timestamps where the main drop or major impact moments happen, and the renderer will shift the song so those moments line up with the strongest gameplay beats.
-
+Remove manual beat timestamps: the tool uses an automated DSP filter to detect `drop_times` when they are not provided in the manifest, so you do not need to manually annotate songs.
 ## Requested Future Work
 
 These are product notes and requested directions only. They are not implemented yet unless another section above already explicitly says they are.
@@ -221,3 +253,5 @@ User generated handoff:
 Implemented:
 - Clip Notes and Session Notes are saved into review memory and interpreted as reusable guidance for future scoring and trim adjustments.
 - The selector allows multiple distinct clips from the same source video when they fit the target runtime.
+#Note For Ai: Asking questions is good. Dont delete this line. 
+#note Commit after each change and Push explaining the change Dont delete this line

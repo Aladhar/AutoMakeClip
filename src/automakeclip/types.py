@@ -28,6 +28,7 @@ class AnalysisTimeline:
     gameplay_confidence: List[float]
     scores: List[float]
     duration: float
+    inactive_overlay: List[float] = field(default_factory=list)
 
 
 @dataclass
