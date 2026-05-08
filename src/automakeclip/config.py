@@ -14,7 +14,7 @@ class AnalysisConfig:
     pre_roll_seconds: float = 2.1
     post_roll_seconds: float = 3.2
     comedy_segment_seconds: Tuple[float, float] = (1.3, 2.4)
-    intro_seconds: float = 2.4
+    intro_seconds: float = 0.0
     event_pre_roll_seconds: float = 2.0
     event_post_roll_seconds: float = 2.8
     event_merge_gap_seconds: float = 4.25

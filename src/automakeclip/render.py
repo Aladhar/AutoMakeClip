@@ -50,12 +50,17 @@ def render_montage(plan: MontagePlan, analysis_config: AnalysisConfig, render_co
     output_path = plan.output_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    intro_seconds = max(0.0, analysis_config.intro_seconds)
+
     with tempfile.TemporaryDirectory(prefix="automakeclip_") as temp_root:
         temp_dir = Path(temp_root)
         intro_path = temp_dir / "intro.mp4"
         stitched_path = temp_dir / "stitched.mp4"
 
-        _create_intro(intro_path, plan, render_config, analysis_config.intro_seconds)
+        concat_entries: List[Path] = []
+        if intro_seconds > 0.0:
+            _create_intro(intro_path, plan, render_config, intro_seconds)
+            concat_entries.append(intro_path)
 
         segment_paths: List[Path] = []
         for index, segment in enumerate(plan.segments, start=1):
@@ -63,7 +68,7 @@ def render_montage(plan: MontagePlan, analysis_config: AnalysisConfig, render_co
             _render_segment(segment, segment_path, render_config)
             segment_paths.append(segment_path)
 
-        concat_entries = [intro_path] + segment_paths
+        concat_entries.extend(segment_paths)
         concat_file = temp_dir / "concat.txt"
         concat_file.write_text("".join(f"file '{path.as_posix()}'\n" for path in concat_entries), encoding="utf-8")
 
@@ -94,7 +99,7 @@ def render_montage(plan: MontagePlan, analysis_config: AnalysisConfig, render_co
         )
 
         if plan.music and plan.music.local_path:
-            _mix_music(stitched_path, plan, output_path, render_config, analysis_config.intro_seconds)
+            _mix_music(stitched_path, plan, output_path, render_config, intro_seconds)
         else:
             run_ffmpeg(
                 [
@@ -317,11 +322,13 @@ def _build_music_mix_filter(
     fade_out_start: float,
 ) -> str:
     return (
-        f"[0:a]volume={config.game_audio_gain},highpass=f=120,aresample=48000[game_sc];"
+        f"[0:a]volume={config.game_audio_gain},highpass=f=120,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[game_sc];"
         f"[1:a]atrim=start={music_start_offset:.3f}:end={music_end:.3f},asetpts=PTS-STARTPTS,volume={config.music_gain},"
-        f"afade=t=in:st=0:d=0.6,afade=t=out:st={fade_out_start:.3f}:d=1.1,aresample=48000,asplit=2[music_sc][music_mix];"
+        f"afade=t=in:st=0:d=0.6,afade=t=out:st={fade_out_start:.3f}:d=1.1,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=2[music_sc][music_mix];"
         "[game_sc][music_sc]sidechaincompress=threshold=0.08:ratio=10:attack=15:release=250:makeup=1.0[ducked_game];"
-        "[ducked_game][music_mix]amix=inputs=2:weights=0.85 1.0:normalize=0,alimiter=limit=0.95[a]"
+        "[ducked_game][music_mix]amix=inputs=2:weights=0.85 1.0,alimiter=limit=0.95[a]"
     )
 
 

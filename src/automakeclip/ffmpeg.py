@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import wave
 from pathlib import Path
 from typing import Any, Dict, Iterator, Tuple
 
@@ -83,35 +84,72 @@ def probe_video(path: Path) -> VideoMetadata:
 
 
 def extract_audio_samples(path: Path, sample_rate: int) -> np.ndarray:
-    process = subprocess.run(
-        [
-            "ffmpeg",
-            "-v",
-            "error",
-            "-i",
-            str(path),
-            "-vn",
-            "-ac",
-            "1",
-            "-ar",
-            str(sample_rate),
-            "-f",
-            "f32le",
-            "-acodec",
-            "pcm_f32le",
-            "-",
-        ],
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    try:
+        process = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-i",
+                str(path),
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                str(sample_rate),
+                "-f",
+                "f32le",
+                "-acodec",
+                "pcm_f32le",
+                "-",
+            ],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        if path.suffix.lower() == ".wav":
+            return _extract_wav_samples(path, sample_rate)
+        raise
     if process.returncode != 0:
+        if path.suffix.lower() == ".wav":
+            return _extract_wav_samples(path, sample_rate)
         raise FFmpegError(process.stderr.decode("utf-8", errors="ignore").strip() or "audio extraction failed")
 
     samples = np.frombuffer(process.stdout, dtype=np.float32)
     if samples.size == 0:
         return np.zeros(sample_rate, dtype=np.float32)
     return samples
+
+
+def _extract_wav_samples(path: Path, sample_rate: int) -> np.ndarray:
+    with wave.open(str(path), "rb") as handle:
+        channel_count = max(1, handle.getnchannels())
+        sample_width = handle.getsampwidth()
+        source_rate = handle.getframerate()
+        frame_count = handle.getnframes()
+        raw = handle.readframes(frame_count)
+
+    if not raw:
+        return np.zeros(sample_rate, dtype=np.float32)
+    if sample_width == 1:
+        samples = (np.frombuffer(raw, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+    elif sample_width == 2:
+        samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    elif sample_width == 4:
+        samples = np.frombuffer(raw, dtype=np.int32).astype(np.float32) / 2147483648.0
+    else:
+        raise FFmpegError(f"Unsupported WAV sample width: {sample_width}")
+
+    if channel_count > 1:
+        complete_frames = samples.size - (samples.size % channel_count)
+        samples = samples[:complete_frames].reshape((-1, channel_count)).mean(axis=1)
+    if source_rate > 0 and source_rate != sample_rate and samples.size:
+        output_size = max(1, int(round(samples.size * sample_rate / float(source_rate))))
+        source_positions = np.linspace(0.0, 1.0, num=samples.size, dtype=np.float32)
+        target_positions = np.linspace(0.0, 1.0, num=output_size, dtype=np.float32)
+        samples = np.interp(target_positions, source_positions, samples).astype(np.float32)
+    return samples.astype(np.float32, copy=False)
 
 
 def iter_analysis_frames(path: Path, fps: int, width: int, source: VideoMetadata) -> Iterator[Tuple[float, np.ndarray]]:

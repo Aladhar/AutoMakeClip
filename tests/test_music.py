@@ -209,6 +209,45 @@ class MusicTests(unittest.TestCase):
             self.assertEqual(track.local_path, downloaded_path)
             self.assertTrue(track.drop_times)
 
+    def test_youtube_track_without_detected_drops_falls_back_to_target_bpm_grid(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            manifest_path = root / "tracks.json"
+            manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "title": "No BPM Playlist",
+                            "artist": "YouTube",
+                            "page_url": "https://www.youtube.com/watch?v=abc&list=playlist",
+                            "download_url": "https://www.youtube.com/watch?v=abc&list=playlist",
+                            "source_kind": "youtube_playlist",
+                            "tags": ["electronic", "gaming"],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            def fake_download(track, output_dir, config):
+                output_dir.mkdir(parents=True, exist_ok=True)
+                downloaded_path = output_dir / "playlist.wav"
+                _write_generated_track(downloaded_path, mood="balanced", bpm=138.0, duration_seconds=32.0)
+                return downloaded_path
+
+            with patch("automakeclip.music._download_youtube_audio", side_effect=fake_download), patch(
+                "automakeclip.music.auto_detect_drop_times", return_value=[]
+            ):
+                track = select_music_track(
+                    mood="balanced",
+                    target_bpm=138.0,
+                    output_dir=root / "output_music",
+                    config=MusicConfig(source="youtube", library_manifest=str(manifest_path), allow_generated_fallback=False),
+                )
+
+            self.assertGreaterEqual(len(track.drop_times), 1)
+            self.assertAlmostEqual(track.drop_times[0], 6.957, places=3)
+
     def test_auto_detect_drop_times_finds_generated_track_impacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             root = Path(temp_root)

@@ -11,6 +11,16 @@ from .types import AnalysisTimeline, VideoMetadata
 
 
 CACHE_VERSION = 2
+TIMELINE_CONFIG_KEYS = {
+    "analysis_fps",
+    "analysis_width",
+    "audio_sample_rate",
+    "score_smoothing_frames",
+    "killfeed_roi",
+    "hud_roi",
+    "center_roi",
+    "weights",
+}
 
 
 def load_analysis_cache(cache_dir: Path, source_path: Path, config: AnalysisConfig) -> Optional[Tuple[VideoMetadata, AnalysisTimeline]]:
@@ -32,7 +42,7 @@ def load_analysis_cache(cache_dir: Path, source_path: Path, config: AnalysisConf
         return None
     if payload.get("file_mtime_ns") != stat.st_mtime_ns:
         return None
-    if payload.get("analysis_config") != _normalized_config(config):
+    if not _analysis_config_matches(payload.get("analysis_config"), config):
         return None
 
     metadata_payload = payload.get("metadata")
@@ -113,7 +123,7 @@ def _load_cache_payload(cache_path: Path, config: AnalysisConfig) -> Optional[Tu
         return None
     if payload.get("file_mtime_ns") != stat.st_mtime_ns:
         return None
-    if payload.get("analysis_config") != _normalized_config(config):
+    if not _analysis_config_matches(payload.get("analysis_config"), config):
         return None
 
     metadata_payload = payload.get("metadata")
@@ -130,4 +140,12 @@ def _load_cache_payload(cache_path: Path, config: AnalysisConfig) -> Optional[Tu
 
 
 def _normalized_config(config: AnalysisConfig):
-    return json.loads(json.dumps(asdict(config)))
+    payload = asdict(config)
+    return json.loads(json.dumps({key: payload[key] for key in sorted(TIMELINE_CONFIG_KEYS)}))
+
+
+def _analysis_config_matches(payload: object, config: AnalysisConfig) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    stored = json.loads(json.dumps({key: payload.get(key) for key in sorted(TIMELINE_CONFIG_KEYS)}))
+    return stored == _normalized_config(config)

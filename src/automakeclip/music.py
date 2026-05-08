@@ -42,7 +42,7 @@ def select_music_track(mood: str, target_bpm: float, output_dir: Path, config: M
         if library_tracks:
             selected = max(library_tracks, key=lambda track: _local_track_score(track, mood, target_bpm))
             if selected.local_path:
-                _ensure_track_drop_times(selected, selected.local_path)
+                _ensure_track_drop_times(selected, selected.local_path, fallback_bpm=target_bpm)
             return selected
 
     if "youtube" in sources:
@@ -60,7 +60,7 @@ def select_music_track(mood: str, target_bpm: float, output_dir: Path, config: M
                     analysis_path = _convert_to_wav(candidate.local_path, output_dir)
                 except MusicSelectionError:
                     analysis_path = candidate.local_path
-                _ensure_track_drop_times(candidate, analysis_path)
+                _ensure_track_drop_times(candidate, analysis_path, fallback_bpm=target_bpm)
                 return candidate
             except MusicSelectionError as error:
                 youtube_error = error
@@ -79,7 +79,7 @@ def select_music_track(mood: str, target_bpm: float, output_dir: Path, config: M
             try:
                 if not candidate.local_path.exists():
                     _download_file(candidate.download_url, candidate.local_path, timeout_seconds=config.download_timeout_seconds)
-                _ensure_track_drop_times(candidate, candidate.local_path)
+                _ensure_track_drop_times(candidate, candidate.local_path, fallback_bpm=target_bpm)
                 return candidate
             except MusicSelectionError:
                 continue
@@ -214,7 +214,7 @@ def _load_local_library_tracks(manifest_path: Path) -> List[MusicTrack]:
                 usage_note=str(record.get("usage_note") or ""),
                 youtube_safe=bool(record.get("youtube_safe", False)),
                 trend_score=float(record.get("trend_score") or 0.0),
-                drop_times=_coerce_float_list(record.get("drop_times")) or _default_drop_times(_coerce_float(record.get("bpm"))),
+                drop_times=_coerce_float_list(record.get("drop_times")),
             )
         )
     if not tracks and skipped_spotify_records:
@@ -261,7 +261,7 @@ def _load_youtube_manifest_tracks(manifest_path: Path) -> List[MusicTrack]:
                 usage_note=str(record.get("usage_note") or "Downloaded with yt-dlp from a user-supplied YouTube URL."),
                 youtube_safe=bool(record.get("youtube_safe", False)),
                 trend_score=float(record.get("trend_score") or 0.0),
-                drop_times=_coerce_float_list(record.get("drop_times")) or _default_drop_times(_coerce_float(record.get("bpm"))),
+                drop_times=_coerce_float_list(record.get("drop_times")),
             )
         )
     return tracks
@@ -342,7 +342,7 @@ def _download_file(url: str, destination: Path, timeout_seconds: int) -> None:
         raise MusicSelectionError(f"Unable to download music track: {error}") from error
 
 
-def _ensure_track_drop_times(track: MusicTrack, analysis_path: Path) -> None:
+def _ensure_track_drop_times(track: MusicTrack, analysis_path: Path, fallback_bpm: Optional[float] = None) -> None:
     if track.drop_times:
         return
     detected = auto_detect_drop_times(analysis_path)
@@ -350,7 +350,8 @@ def _ensure_track_drop_times(track: MusicTrack, analysis_path: Path) -> None:
         track.drop_times = detected
         return
     duration_seconds = _audio_duration_seconds(analysis_path)
-    track.drop_times = _default_drop_times(track.bpm, duration_seconds=duration_seconds if duration_seconds > 0 else 96.0)
+    bpm = track.bpm if track.bpm and track.bpm > 0 else fallback_bpm
+    track.drop_times = _default_drop_times(bpm, duration_seconds=duration_seconds if duration_seconds > 0 else 96.0)
 
 
 def _convert_to_wav(input_path: Path, output_dir: Path) -> Path:

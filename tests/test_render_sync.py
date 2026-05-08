@@ -1,8 +1,10 @@
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
-from automakeclip.config import RenderConfig
-from automakeclip.render import _build_music_mix_filter, compute_music_start_offset
+from automakeclip.config import AnalysisConfig, RenderConfig
+from automakeclip.render import _build_music_mix_filter, compute_music_start_offset, render_montage
 from automakeclip.types import MontagePlan, MusicTrack, Segment
 
 
@@ -61,9 +63,54 @@ class RenderSyncTests(unittest.TestCase):
         )
 
         self.assertIn("asplit=2[music_sc][music_mix]", filter_complex)
+        self.assertIn("aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo", filter_complex)
         self.assertIn("[game_sc][music_sc]sidechaincompress", filter_complex)
         self.assertIn("weights=0.85 1.0", filter_complex)
+        self.assertNotIn("normalize=0", filter_complex)
         self.assertIn("volume=0.95", filter_complex)
+
+    def test_render_starts_with_gameplay_when_intro_duration_is_zero(self) -> None:
+        with TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            concat_payloads = []
+            plan = MontagePlan(
+                input_paths=[root / "input.mp4"],
+                output_path=root / "output.mp4",
+                title="Test",
+                subtitle="Test",
+                target_seconds=10.0,
+                source_duration=10.0,
+                source_durations={str(root / "input.mp4"): 10.0},
+                segments=[
+                    Segment(
+                        start=1.0,
+                        end=4.0,
+                        score=5.0,
+                        label="highlight",
+                        source_path=str(root / "input.mp4"),
+                        highlight_time=3.0,
+                    )
+                ],
+                mood="balanced",
+                target_bpm=138.0,
+            )
+
+            def fake_run_ffmpeg(args):
+                if "-f" in args and "concat" in args:
+                    concat_path = Path(args[args.index("-i") + 1])
+                    concat_payloads.append(concat_path.read_text(encoding="utf-8"))
+
+            with patch("automakeclip.render._create_intro") as create_intro, patch(
+                "automakeclip.render._render_segment"
+            ), patch("automakeclip.render.run_ffmpeg", side_effect=fake_run_ffmpeg), patch(
+                "automakeclip.render._write_sidecars"
+            ), patch("automakeclip.latest_render.record_latest_render"):
+                render_montage(plan, AnalysisConfig(), RenderConfig(), keep_temp=False)
+
+        create_intro.assert_not_called()
+        self.assertEqual(len(concat_payloads), 1)
+        self.assertIn("segment_01.mp4", concat_payloads[0])
+        self.assertNotIn("intro.mp4", concat_payloads[0])
 
 
 if __name__ == "__main__":

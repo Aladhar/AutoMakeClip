@@ -9,7 +9,7 @@ AutoMakeClip turns a long Overwatch gameplay recording into a tighter highlight 
 - aligns clip lengths toward the chosen track's beat grid (making them synchronous with music)
 - exports a higher-fidelity final montage MP4 plus a credits file for the music
 
-The goal is the vibe you described: compact gameplay cuts, a quick intro, some silly chaos, and the strongest highlight moments.
+The goal is the vibe you described: compact gameplay cuts that start directly on gameplay, some silly chaos, and the strongest highlight moments.
 
 ## SteelSeries-Style Auto-Clipping
 
