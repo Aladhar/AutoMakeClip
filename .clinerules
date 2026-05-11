@@ -1,0 +1,39 @@
+# Cline Rules for AutoMakeClip
+
+## Default workflow
+- Start every task by inspecting relevant files first.
+- Do not guess project structure.
+- Read README, package.json, config files, and relevant source files before editing.
+- Explain the plan before editing.
+- Mention the exact files you plan to change.
+
+## Commands
+- Run commands one at a time.
+- Before each command, explain what it does and why it is safe.
+- After a failed command, stop and explain the error before trying another command.
+- Do not install packages unless you explain why and ask first.
+
+## Never run without explicit user approval
+- rm -rf
+- del /s
+- rmdir /s
+- Remove-Item -Recurse
+- git reset --hard
+- git clean -fd
+- npm uninstall
+- database reset commands
+- format/shutdown/restart commands
+- global installs
+
+## Smoke testing
+- After edits, run the smallest relevant smoke test.
+- Inspect package.json scripts first.
+- Prefer npm run build, npm test, or npm run lint if available.
+- Do not run npm run dev unless needed.
+
+## Coding behavior
+- Make minimal changes.
+- Do not rewrite unrelated files.
+- Do not invent APIs.
+- Follow existing imports and patterns.
+- If unsure, say what you are unsure about.
