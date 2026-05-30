@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from automakeclip.config import AnalysisConfig, RenderConfig
-from automakeclip.render import _build_music_mix_filter, compute_music_start_offset, render_montage
+from automakeclip.render import _build_music_mix_filter, _build_video_filter, compute_music_start_offset, render_montage
 from automakeclip.types import MontagePlan, MusicTrack, Segment
 
 
@@ -68,6 +68,28 @@ class RenderSyncTests(unittest.TestCase):
         self.assertIn("weights=0.85 1.0", filter_complex)
         self.assertNotIn("normalize=0", filter_complex)
         self.assertIn("volume=0.95", filter_complex)
+
+    def test_shorts_video_filter_pins_hud_crops_over_vertical_gameplay(self) -> None:
+        config = RenderConfig(width=1080, height=1920, layout="shorts")
+
+        filter_complex = _build_video_filter(config)
+
+        self.assertIn("split=3[main][health][kill]", filter_complex)
+        self.assertIn("scale=1080:1920:force_original_aspect_ratio=increase", filter_complex)
+        self.assertIn("crop=1080:1920", filter_complex)
+        self.assertIn("[health]crop=w=iw*0.34:h=ih*0.22:x=0:y=ih*0.745", filter_complex)
+        self.assertIn("[kill]crop=w=iw*0.30:h=ih*0.23:x=iw*0.695:y=ih*0.035", filter_complex)
+        self.assertIn("overlay=W-w-28:H-h-61", filter_complex)
+        self.assertIn("overlay=W-w-28:61", filter_complex)
+
+    def test_shorts_video_filter_can_preserve_full_frame_over_blurred_background(self) -> None:
+        config = RenderConfig(width=1080, height=1920, layout="shorts", shorts_hud_overlays=False)
+
+        filter_complex = _build_video_filter(config)
+
+        self.assertIn("split=2[bg][fg]", filter_complex)
+        self.assertIn("boxblur=24:2", filter_complex)
+        self.assertIn("overlay=(W-w)/2:(H-h)/2", filter_complex)
 
     def test_render_starts_with_gameplay_when_intro_duration_is_zero(self) -> None:
         with TemporaryDirectory() as temp_root:

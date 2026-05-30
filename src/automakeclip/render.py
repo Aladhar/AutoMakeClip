@@ -220,7 +220,7 @@ def _render_segment(segment: Segment, output_path: Path, config: RenderConfig) -
             "-i",
             segment.source_path,
             "-vf",
-            f"fps={config.fps},scale={config.width}:{config.height}:force_original_aspect_ratio=decrease,pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+            _build_video_filter(config),
             "-af",
             "aresample=48000",
             "-r",
@@ -237,6 +237,40 @@ def _render_segment(segment: Segment, output_path: Path, config: RenderConfig) -
             config.audio_bitrate,
             str(output_path),
         ]
+    )
+
+
+def _build_video_filter(config: RenderConfig) -> str:
+    if config.layout == "shorts":
+        if config.shorts_hud_overlays:
+            overlay_width = max(360, int(config.width * 0.42))
+            killfeed_width = max(420, int(config.width * 0.46))
+            margin = max(20, int(config.width * 0.026))
+            top_margin = max(44, int(config.height * 0.032))
+            health_bottom_margin = max(48, int(config.height * 0.032))
+            return (
+                f"fps={config.fps},format=yuv420p,split=3[main][health][kill];"
+                f"[main]scale={config.width}:{config.height}:force_original_aspect_ratio=increase,"
+                f"crop={config.width}:{config.height}[mainv];"
+                "[health]crop=w=iw*0.34:h=ih*0.22:x=0:y=ih*0.745,"
+                f"scale={overlay_width}:-1,format=yuva420p,colorchannelmixer=aa=0.96[healthv];"
+                "[kill]crop=w=iw*0.30:h=ih*0.23:x=iw*0.695:y=ih*0.035,"
+                f"scale={killfeed_width}:-1,format=yuva420p,colorchannelmixer=aa=0.96[killv];"
+                f"[mainv][healthv]overlay=W-w-{margin}:H-h-{health_bottom_margin}[with_health];"
+                f"[with_health][killv]overlay=W-w-{margin}:{top_margin},format=yuv420p"
+            )
+        return (
+            f"fps={config.fps},format=yuv420p,split=2[bg][fg];"
+            f"[bg]scale={config.width}:{config.height}:force_original_aspect_ratio=increase,"
+            f"crop={config.width}:{config.height},boxblur=24:2,eq=contrast=1.05:saturation=1.12[bgv];"
+            f"[fg]scale={config.width}:{config.height}:force_original_aspect_ratio=decrease[fgv];"
+            f"[bgv][fgv]overlay=(W-w)/2:(H-h)/2,format=yuv420p"
+        )
+    return (
+        f"fps={config.fps},"
+        f"scale={config.width}:{config.height}:force_original_aspect_ratio=decrease,"
+        f"pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2,"
+        "format=yuv420p"
     )
 
 

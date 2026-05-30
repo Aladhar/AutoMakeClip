@@ -8,6 +8,8 @@ from unittest.mock import patch
 from automakeclip.config import MusicConfig
 from automakeclip.music import (
     MusicSelectionError,
+    MusicTrack,
+    _youtube_playlist_download_args,
     _write_generated_track,
     auto_detect_drop_times,
     resolve_music_manifest_path,
@@ -208,6 +210,25 @@ class MusicTests(unittest.TestCase):
             self.assertEqual(track.source_kind, "youtube_playlist")
             self.assertEqual(track.local_path, downloaded_path)
             self.assertTrue(track.drop_times)
+
+    def test_youtube_playlist_download_args_randomize_playlist_items(self) -> None:
+        track = MusicTrack(
+            title="Playlist",
+            artist="YouTube",
+            license_name="User supplied",
+            page_url="https://www.youtube.com/watch?v=abc&list=playlist",
+            download_url="https://www.youtube.com/watch?v=abc&list=playlist",
+            source_kind="youtube_playlist",
+        )
+
+        args = _youtube_playlist_download_args(track, MusicConfig(query_limit=12, randomize_youtube_playlist=True))
+
+        self.assertIn("--yes-playlist", args)
+        self.assertIn("--playlist-random", args)
+        self.assertIn("--playlist-end", args)
+        self.assertIn("12", args)
+        self.assertIn("--max-downloads", args)
+        self.assertIn("1", args)
 
     def test_youtube_track_without_detected_drops_falls_back_to_target_bpm_grid(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

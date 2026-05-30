@@ -42,6 +42,7 @@ class MusicConfig:
     source: str = "youtube"
     preferred_licenses: List[str] = field(default_factory=lambda: ["by"])
     query_limit: int = 24
+    randomize_youtube_playlist: bool = True
     download_timeout_seconds: int = 30
     library_manifest: str = "music_library/tracks.json"
     allow_generated_fallback: bool = False
@@ -51,6 +52,8 @@ class MusicConfig:
 class RenderConfig:
     width: int = 2560
     height: int = 1440
+    layout: str = "landscape"
+    shorts_hud_overlays: bool = True
     fps: int = 30
     video_codec: str = "libx264"
     audio_codec: str = "aac"

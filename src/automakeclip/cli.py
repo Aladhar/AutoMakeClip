@@ -63,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--title", default="OVERWATCH HIGHLIGHTS", help="Intro title text.")
     parser.add_argument("--subtitle", default="big plays, chaos, and one goofy moment", help="Intro subtitle text.")
     parser.add_argument("--target-seconds", type=float, default=42.0, help="Target runtime for the final montage.")
+    parser.add_argument(
+        "--shorts",
+        action="store_true",
+        help="Render a 1080x1920 vertical Shorts/TikTok/Reels export.",
+    )
     parser.add_argument("--no-music", action="store_true", help="Skip automatic music selection and mixing.")
     parser.add_argument(
         "--music-source",
@@ -88,6 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="When an input is a YouTube /streams page, cap how many recent stream VODs are pulled in. Use 0 for no limit.",
     )
+    parser.add_argument(
+        "--youtube-timestamp-window",
+        type=float,
+        default=360.0,
+        help="For a YouTube URL with t/start_time, download this many seconds around that timestamp. Use 0 to download the full video.",
+    )
     return parser
 
 
@@ -107,6 +118,10 @@ def main() -> int:
         config.render.music_gain = args.music_gain
     if args.game_audio_gain is not None:
         config.render.game_audio_gain = args.game_audio_gain
+    if args.shorts:
+        config.render.width = 1080
+        config.render.height = 1920
+        config.render.layout = "shorts"
     try:
         from .analysis import analyze_gameplay, infer_montage_profile
         from .cache import load_analysis_cache, load_cached_analysis_entries, store_analysis_cache
@@ -126,6 +141,7 @@ def main() -> int:
             args.input,
             download_root=Path.cwd() / ".automakeclip_downloads",
             youtube_playlist_limit=args.youtube_playlist_limit if args.youtube_playlist_limit > 0 else None,
+            youtube_timestamp_window=args.youtube_timestamp_window if args.youtube_timestamp_window > 0 else None,
         )
     output_path = Path(args.output).expanduser().resolve()
     missing_paths = [path for path in input_paths if not path.exists()]

@@ -7,7 +7,9 @@ from automakeclip.inputs import (
     _filter_overwatch_entries,
     _is_probable_url,
     _looks_like_youtube_streams_page,
+    _parse_youtube_timecode,
     _playlist_end_args,
+    _youtube_start_time_seconds,
     looks_like_non_gameplay_source,
     resolve_inputs,
 )
@@ -32,6 +34,12 @@ class InputTests(unittest.TestCase):
         self.assertEqual(_playlist_end_args(None), [])
         self.assertEqual(_playlist_end_args(0), [])
         self.assertEqual(_playlist_end_args(8), ["--playlist-end", "8"])
+
+    def test_parses_youtube_timestamp_inputs(self) -> None:
+        self.assertEqual(_parse_youtube_timecode("4719s"), 4719.0)
+        self.assertEqual(_parse_youtube_timecode("1h18m39s"), 4719.0)
+        self.assertEqual(_youtube_start_time_seconds("https://www.youtube.com/watch?v=abc&t=4719s"), 4719.0)
+        self.assertEqual(_youtube_start_time_seconds("https://youtu.be/abc?start=90"), 90.0)
 
     def test_detects_non_gameplay_source_names(self) -> None:
         self.assertTrue(looks_like_non_gameplay_source(Path("/tmp/zoom_0.mp4")))

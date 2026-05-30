@@ -6,7 +6,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 class InputResolutionError(RuntimeError):
@@ -22,13 +22,18 @@ class YoutubeEntry:
     webpage_url: str
 
 
-def resolve_inputs(raw_inputs: List[List[str]], download_root: Path, youtube_playlist_limit: int | None = None) -> List[Path]:
+def resolve_inputs(
+    raw_inputs: List[List[str]],
+    download_root: Path,
+    youtube_playlist_limit: int | None = None,
+    youtube_timestamp_window: float | None = 360.0,
+) -> List[Path]:
     resolved: List[Path] = []
     seen = set()
     for group in raw_inputs:
         for value in group:
             if _is_probable_url(value):
-                for path in _resolve_url_input(value, download_root, youtube_playlist_limit):
+                for path in _resolve_url_input(value, download_root, youtube_playlist_limit, youtube_timestamp_window):
                     if path not in seen:
                         resolved.append(path)
                         seen.add(path)
@@ -58,7 +63,12 @@ def _iter_local_video_files(path: Path) -> List[Path]:
     )
 
 
-def _resolve_url_input(url: str, download_root: Path, youtube_playlist_limit: int | None) -> List[Path]:
+def _resolve_url_input(
+    url: str,
+    download_root: Path,
+    youtube_playlist_limit: int | None,
+    youtube_timestamp_window: float | None,
+) -> List[Path]:
     yt_dlp_command = _yt_dlp_command()
 
     urls = [url]
@@ -72,11 +82,25 @@ def _resolve_url_input(url: str, download_root: Path, youtube_playlist_limit: in
     download_root.mkdir(parents=True, exist_ok=True)
     downloaded: List[Path] = []
     for item_url in urls:
-        downloaded.extend(_download_youtube_url(item_url, download_root, yt_dlp_command))
+        timestamp = _youtube_start_time_seconds(item_url)
+        downloaded.extend(_download_youtube_url(item_url, download_root, yt_dlp_command, timestamp, youtube_timestamp_window))
     return downloaded
 
 
-def _download_youtube_url(url: str, download_root: Path, yt_dlp_command: Sequence[str]) -> List[Path]:
+def _download_youtube_url(
+    url: str,
+    download_root: Path,
+    yt_dlp_command: Sequence[str],
+    timestamp_seconds: float | None = None,
+    timestamp_window: float | None = 360.0,
+) -> List[Path]:
+    section_args: List[str] = []
+    if timestamp_seconds is not None and timestamp_window is not None and timestamp_window > 0:
+        pre_roll = min(90.0, max(timestamp_window * 0.25, 0.0))
+        start = max(0.0, timestamp_seconds - pre_roll)
+        end = start + timestamp_window
+        section_args = ["--download-sections", f"*{start:.3f}-{end:.3f}", "--force-keyframes-at-cuts"]
+
     command = [
         *yt_dlp_command,
         "--no-playlist",
@@ -86,6 +110,7 @@ def _download_youtube_url(url: str, download_root: Path, yt_dlp_command: Sequenc
         "bv*+ba/best",
         "-o",
         str(download_root / "%(title).120B [%(id)s].%(ext)s"),
+        *section_args,
         "--print",
         "after_move:filepath",
         url,
@@ -171,6 +196,54 @@ def _looks_like_youtube_streams_page(url: str) -> bool:
 def _is_probable_url(value: str) -> bool:
     parsed = urlparse(value)
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _youtube_start_time_seconds(url: str) -> float | None:
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    for key in ("t", "start", "start_time"):
+        values = query.get(key)
+        if not values:
+            continue
+        parsed_time = _parse_youtube_timecode(values[0])
+        if parsed_time is not None:
+            return parsed_time
+    if parsed.fragment:
+        fragment_query = parse_qs(parsed.fragment)
+        values = fragment_query.get("t")
+        if values:
+            return _parse_youtube_timecode(values[0])
+        if parsed.fragment.startswith("t="):
+            return _parse_youtube_timecode(parsed.fragment[2:])
+    return None
+
+
+def _parse_youtube_timecode(value: str) -> float | None:
+    cleaned = value.strip().lower()
+    if not cleaned:
+        return None
+    if cleaned.endswith("s") and cleaned[:-1].replace(".", "", 1).isdigit():
+        return float(cleaned[:-1])
+    if cleaned.replace(".", "", 1).isdigit():
+        return float(cleaned)
+
+    total = 0.0
+    number = ""
+    seen_unit = False
+    unit_multipliers = {"h": 3600.0, "m": 60.0, "s": 1.0}
+    for character in cleaned:
+        if character.isdigit() or character == ".":
+            number += character
+            continue
+        multiplier = unit_multipliers.get(character)
+        if multiplier is None or not number:
+            return None
+        total += float(number) * multiplier
+        number = ""
+        seen_unit = True
+    if number:
+        total += float(number)
+    return total if seen_unit else None
 
 
 def _yt_dlp_command() -> List[str]:

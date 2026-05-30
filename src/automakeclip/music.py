@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import subprocess
 import ssl
 import wave
@@ -51,7 +52,8 @@ def select_music_track(mood: str, target_bpm: float, output_dir: Path, config: M
         except MusicSelectionError as error:
             youtube_tracks = []
             youtube_error = error
-        for candidate in sorted(youtube_tracks, key=lambda track: _local_track_score(track, mood, target_bpm), reverse=True):
+        ranked_youtube_tracks = _rank_youtube_tracks(youtube_tracks, mood, target_bpm, config)
+        for candidate in ranked_youtube_tracks:
             try:
                 if candidate.local_path is None or not candidate.local_path.exists():
                     candidate.local_path = _download_youtube_audio(candidate, output_dir, config)
@@ -282,18 +284,7 @@ def _download_youtube_audio(track: MusicTrack, output_dir: Path, config: MusicCo
     if not _looks_like_youtube_url(url):
         raise MusicSelectionError(f"Music track is not a YouTube URL: {url}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    playlist_args = (
-        [
-            "--yes-playlist",
-            "--playlist-end",
-            str(max(1, config.query_limit)),
-            "--max-downloads",
-            "1",
-            "--ignore-errors",
-        ]
-        if _is_youtube_playlist_track(track)
-        else ["--no-playlist"]
-    )
+    playlist_args = _youtube_playlist_download_args(track, config)
     command = [
         *_yt_dlp_command(),
         *playlist_args,
@@ -332,6 +323,22 @@ def _download_youtube_audio(track: MusicTrack, output_dir: Path, config: MusicCo
     if process.returncode != 0:
         raise MusicSelectionError(process.stderr.strip() or f"Unable to download YouTube music from {url}")
     raise MusicSelectionError(f"`yt-dlp` did not report a usable audio file for {url}")
+
+
+def _youtube_playlist_download_args(track: MusicTrack, config: MusicConfig) -> List[str]:
+    if not _is_youtube_playlist_track(track):
+        return ["--no-playlist"]
+    args = [
+        "--yes-playlist",
+        "--playlist-end",
+        str(max(1, config.query_limit)),
+        "--max-downloads",
+        "1",
+        "--ignore-errors",
+    ]
+    if config.randomize_youtube_playlist:
+        args.append("--playlist-random")
+    return args
 
 
 def _download_file(url: str, destination: Path, timeout_seconds: int) -> None:
@@ -418,6 +425,18 @@ def _local_track_score(track: MusicTrack, mood: str, target_bpm: float) -> float
     elif track.source_kind in {"youtube_audio_library", "creator_music"}:
         source_bonus = 6.0
     return track.trend_score * 2.5 + tag_bonus * 3.0 + youtube_bonus + source_bonus - bpm_penalty * 0.2
+
+
+def _rank_youtube_tracks(tracks: List[MusicTrack], mood: str, target_bpm: float, config: MusicConfig) -> List[MusicTrack]:
+    if not config.randomize_youtube_playlist:
+        return sorted(tracks, key=lambda track: _local_track_score(track, mood, target_bpm), reverse=True)
+    shuffled = list(tracks)
+    random.shuffle(shuffled)
+    return sorted(
+        shuffled,
+        key=lambda track: (_local_track_score(track, mood, target_bpm), random.random() * 0.001),
+        reverse=True,
+    )
 
 
 def _track_distance(track: MusicTrack, target_bpm: float) -> float:

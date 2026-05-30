@@ -81,6 +81,7 @@ Useful options:
 ```bash
 automakeclip --help
 automakeclip --input take.mp4 --output reel.mp4 --target-seconds 38
+automakeclip --input "https://www.youtube.com/watch?v=1q6Mm2U5IMI&t=4719s" --output output/shorts_clip.mp4 --shorts --target-seconds 45
 automakeclip --input take1.mp4 take2.mp4 take3.mp4 --output reel.mp4
 automakeclip --input "/path/to/Videos" --output reel.mp4
 automakeclip --input take.mp4 --output reel.mp4 --no-silly
@@ -92,6 +93,10 @@ automakeclip --from-cache --output reel.mp4
 ```
 
 You can also pass YouTube URLs when `yt-dlp` is installed. If you pass a YouTube channel `/streams` page, the resolver looks for titles that mention `Overwatch` or `OW2`, downloads those VODs locally, and then analyzes the resulting MP4s. Stream-page resolution is unlimited by default; pass `--youtube-playlist-limit N` only when you explicitly want to cap how many recent VODs get pulled in.
+
+For YouTube URLs with `t=`, `start`, or `start_time`, AutoMakeClip downloads a focused section around that timestamp by default so a timestamped VOD link behaves like a clip-source import instead of pulling the whole stream. The default section is 360 seconds with lead-in before the timestamp; pass `--youtube-timestamp-window 0` to download the full source video.
+
+For Shorts/TikTok/Reels output, pass `--shorts`. This renders a 1080x1920 vertical MP4 with a blurred full-screen background and the full gameplay frame centered over it, preserving the HUD and kill feed instead of cropping the horizontal gameplay.
 
 ## Review UI
 
@@ -160,11 +165,13 @@ The tool also keeps a per-video analysis cache in `.automakeclip_cache/` so repe
 The music picker now defaults to YouTube playlist audio:
 
 - YouTube entries in `music_library/tracks.json` with `source_kind: "youtube"` or `source_kind: "youtube_playlist"`
+- the starter project manifest points at `https://www.youtube.com/watch?v=PvM79DJ2PmM&list=PLaysoNAQ0qMiqX9N9-7TJEydj_MoKTvi0`
+- playlist entries are randomized by default, then `yt-dlp` downloads one audio item for the render
 - local library manifest entries only if you explicitly switch `--music-source library`
 - optional public ccMixter catalog only if you explicitly switch `--music-source auto` or `--music-source ccmixter`
 - generated fallback only if you explicitly pass `--allow-generated-fallback`
 
-YouTube audio is fetched with `yt-dlp` into the output `music_cache/` folder when the montage is created. For playlist URLs, the picker downloads the first available playlist item by default. A starter schema lives at `music_library/tracks.example.json`.
+YouTube audio is fetched with `yt-dlp` into the output `music_cache/` folder when the montage is created. For playlist URLs, the picker downloads one random playlist item by default. A starter schema lives at `music_library/tracks.example.json`.
 
 If you want actual YouTube playlist music:
 
