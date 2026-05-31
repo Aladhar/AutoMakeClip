@@ -9,6 +9,7 @@ from automakeclip.config import MusicConfig
 from automakeclip.music import (
     MusicSelectionError,
     MusicTrack,
+    _music_title_from_downloaded_path,
     _youtube_playlist_download_args,
     _write_generated_track,
     auto_detect_drop_times,
@@ -206,10 +207,15 @@ class MusicTests(unittest.TestCase):
                     config=MusicConfig(source="youtube", library_manifest=str(manifest_path), allow_generated_fallback=False),
                 )
 
-            self.assertEqual(track.title, "Stream Playlist")
+            self.assertEqual(track.title, "playlist")
             self.assertEqual(track.source_kind, "youtube_playlist")
             self.assertEqual(track.local_path, downloaded_path)
             self.assertTrue(track.drop_times)
+
+    def test_playlist_music_title_uses_downloaded_audio_filename_without_youtube_id(self) -> None:
+        title = _music_title_from_downloaded_path(Path("/tmp/The Adults Are Talking [826mxiKjoP0].mp3"))
+
+        self.assertEqual(title, "The Adults Are Talking")
 
     def test_youtube_playlist_download_args_randomize_playlist_items(self) -> None:
         track = MusicTrack(

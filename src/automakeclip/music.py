@@ -57,6 +57,8 @@ def select_music_track(mood: str, target_bpm: float, output_dir: Path, config: M
             try:
                 if candidate.local_path is None or not candidate.local_path.exists():
                     candidate.local_path = _download_youtube_audio(candidate, output_dir, config)
+                if _is_youtube_playlist_track(candidate) and candidate.local_path is not None:
+                    candidate.title = _music_title_from_downloaded_path(candidate.local_path)
                 # Convert downloaded audio to WAV for more reliable analysis, then run detection.
                 try:
                     analysis_path = _convert_to_wav(candidate.local_path, output_dir)
@@ -319,6 +321,8 @@ def _download_youtube_audio(track: MusicTrack, output_dir: Path, config: MusicCo
     ]
     for audio_path in audio_paths:
         if audio_path.exists() and audio_path.suffix.lower() in {".mp3", ".m4a", ".opus", ".webm", ".wav", ".ogg"}:
+            if _is_youtube_playlist_track(track):
+                track.title = _music_title_from_downloaded_path(audio_path)
             return audio_path
     if process.returncode != 0:
         raise MusicSelectionError(process.stderr.strip() or f"Unable to download YouTube music from {url}")
@@ -339,6 +343,14 @@ def _youtube_playlist_download_args(track: MusicTrack, config: MusicConfig) -> L
     if config.randomize_youtube_playlist:
         args.append("--playlist-random")
     return args
+
+
+def _music_title_from_downloaded_path(audio_path: Path) -> str:
+    title = audio_path.stem.strip()
+    bracket_index = title.rfind(" [")
+    if bracket_index > 0 and title.endswith("]"):
+        title = title[:bracket_index].strip()
+    return title or audio_path.stem
 
 
 def _download_file(url: str, destination: Path, timeout_seconds: int) -> None:
