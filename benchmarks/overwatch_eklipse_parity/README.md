@@ -6,39 +6,108 @@ Measures how closely AutoMakeClip's highlight detection matches Eklipse's highli
 
 ```
 benchmarks/overwatch_eklipse_parity/
-├── README.md                 # This file
-├── inputs.example.json       # Example input template (safe to commit)
-├── local_inputs.json         # Your private URL list (git-ignored)
+├── README.md
+├── inputs.example.json                          # Example input schema (committed)
+├── local_inputs.json                            # Your private URL list (git-ignored)
+├── downloads/
+│   └── vod.mp4                                  # Local source video (git-ignored)
 ├── references/
-│   ├── vod_001_eklipse.json  # Timestamps chosen by Eklipse for VOD 001
-│   └── vod_002_eklipse.json  # Timestamps chosen by Eklipse for VOD 002
-└── reports/                  # Generated benchmark reports land here
+│   ├── vod_001_eklipse.json                     # Eklipse exported clip windows
+│   ├── vod_001_eklipse_session_summary.json      # Eklipse AI session summary
+│   └── vod_002_eklipse.json                     # Placeholder for next VOD
+└── reports/
+    └── .gitkeep
 ```
 
-## How to Run
+## Two Parity Goals
 
-1. Copy `inputs.example.json` → `local_inputs.json`.
-2. Fill in your VOD URLs and metadata in `local_inputs.json`.
-3. Ensure `references/` contains the Eklipse-selected timestamps for each VOD.
-4. Run the benchmark (TBD once the benchmark harness is implemented).
+### 1. Clip-Selection Parity (implemented now)
 
-## Reference File Format
+Compare Eklipse exported clip windows against AutoMakeClip `.plan.json` output.
 
-Each reference JSON should contain an array of highlight objects:
+```bash
+automakeclip-parity \
+  --eklipse references/vod_001_eklipse.json \
+  --local output/vod_001_local.plan.json \
+  --report reports/vod_001_report.md
+```
+
+Reports:
+- Export-window: recall, precision, matched/missed/extra clips, timing errors
+- Unique-event-group: did AutoMakeClip detect each underlying event at least once?
+- Rank agreement: only reported when rank values are present (currently `null`)
+
+### 2. Session-Summary/Coaching Parity (future)
+
+AutoMakeClip should build a detected event timeline and generate post-session insights similar to Eklipse's AI session summary. Documented in the roadmap but not yet implemented.
+
+## Input Schema
+
+See `inputs.example.json` for the full schema. Key fields:
+
+| Field | Values | Purpose |
+|---|---|---|
+| `vod_id` | string | Logical identifier |
+| `platform` | `youtube`, `twitch`, `local` | Where the video comes from |
+| `url` | string | Video URL or local path |
+| `purpose` | `parity_benchmark`, `style_reference` | How this input is used |
+| `clip_type` | `full_vod`, `clip` | Full VOD or already-shortened clip |
+
+**Full VOD URLs** (`purpose: parity_benchmark`, `clip_type: full_vod`):
+- Used for Eklipse parity comparison
+- Both Eklipse and AutoMakeClip must find highlights from the same source
+
+**Shortened clip URLs** (`purpose: style_reference`, `clip_type: clip`):
+- Only for testing visual style, crop/layout, captions, audio mix
+- Skipped by the parity comparison report
+
+## Eklipse Reference Format
+
+### Exported Clips (`vod_001_eklipse.json`)
 
 ```json
 [
   {
-    "start_sec": 120.5,
-    "end_sec": 135.2,
-    "label": "teamfight_win",
-    "notes": "Eklipse marked this as a top play"
+    "start_sec": 312.4,
+    "end_sec": 327.8,
+    "event_type": "multi_kill",
+    "event_group": "multi_kill_001",
+    "label": "Multi kill",
+    "rank": null,
+    "notes": "Team fight ending in three eliminations"
   }
 ]
 ```
 
+- `event_group`: clips sharing the same group are from the same underlying event
+- `rank`: null = unknown display order; rank metrics omitted when null
+
+### Session Summary (`vod_001_eklipse_session_summary.json`)
+
+Contains Eklipse's AI-reported events and coaching insights (future parity target).
+
+## Matching Rules
+
+A local clip matches an Eklipse exported clip when:
+- **IoU ≥ 0.50**, OR
+- **Anchor timestamps within 2.0 seconds**
+
+One local clip cannot satisfy multiple unrelated event groups. Multiple overlapping exports within the same `event_group` count as one detected event for event-group metrics.
+
 ## Metrics
 
-- **Overlap rate** – percentage of Eklipse highlights that AutoMakeClip also captures.
-- **False positive rate** – percentage of AutoMakeClip highlights not in Eklipse's list.
-- **Timing accuracy** – average offset between matched highlight boundaries.
+### Export-Window Comparison
+
+| Metric | Description |
+|---|---|
+| Export-level recall | Eklipse clips matched by AutoMakeClip |
+| Export-level precision | AutoMakeClip clips that match Eklipse |
+| Mean start-time error | Average absolute start offset |
+| Mean end-time error | Average absolute end offset |
+
+### Unique-Event-Group Comparison
+
+| Metric | Description |
+|---|---|
+| Unique event-group count | Distinct underlying events |
+| Unique-event recall | Events detected at least once |

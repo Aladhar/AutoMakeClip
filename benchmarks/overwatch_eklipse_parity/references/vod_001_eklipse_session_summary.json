@@ -1,0 +1,123 @@
+{
+  "vod_id": "vod_001",
+  "source_media": {
+    "local_path": "benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+    "filename": "vod.mp4",
+    "purpose": "parity_benchmark",
+    "clip_type": "full_vod",
+    "notes": "Full original VOD submitted to Eklipse. Keep local and git-ignored."
+  },
+  "reference_type": "eklipse_ai_session_summary",
+  "capture_notes": [
+    "This file stores Eklipse's AI-generated session interpretation, not only exported highlight clips.",
+    "Events below were extracted from the Eklipse response supplied by the user.",
+    "Use selected clip exports in vod_001_eklipse.json for clip-window parity; use this file for session-summary/event-insight parity."
+  ],
+  "reported_highlight_events": [
+    {
+      "timestamp_sec": 27.0,
+      "timestamp": "00:00:27",
+      "event_type": "sextuple_kill",
+      "event_label": "Sextuple kill",
+      "source": "eklipse_summary_text"
+    },
+    {
+      "timestamp_sec": 56.0,
+      "timestamp": "00:00:56",
+      "event_type": "sextuple_kill",
+      "event_label": "Sextuple kill",
+      "source": "eklipse_summary_text"
+    },
+    {
+      "timestamp_sec": 81.0,
+      "timestamp": "00:01:21",
+      "event_type": "sextuple_kill",
+      "event_label": "Sextuple kill",
+      "source": "eklipse_summary_text"
+    },
+    {
+      "timestamp_sec": 94.0,
+      "timestamp": "00:01:34",
+      "event_type": "sextuple_kill",
+      "event_label": "Sextuple kill",
+      "source": "eklipse_summary_text"
+    },
+    {
+      "timestamp_sec": 103.0,
+      "timestamp": "00:01:43",
+      "event_type": "sextuple_kill",
+      "event_label": "Sextuple kill",
+      "source": "eklipse_summary_text",
+      "notes": "Mentioned in Eklipse summary but not separately present in the supplied exported-clip list."
+    },
+    {
+      "timestamp_sec": 1075.0,
+      "timestamp": "00:17:55",
+      "event_type": "triple_kill",
+      "event_label": "Triple kill",
+      "source": "eklipse_summary_text"
+    },
+    {
+      "timestamp_sec": 4709.0,
+      "timestamp": "01:18:29",
+      "event_type": "teammate_save",
+      "event_label": "Teammate save",
+      "source": "eklipse_summary_text"
+    },
+    {
+      "timestamp_sec": 4608.0,
+      "timestamp": "01:16:48",
+      "event_type": "teammate_save",
+      "event_label": "Teammate save",
+      "source": "eklipse_summary_text"
+    },
+    {
+      "timestamp_sec": 2806.0,
+      "timestamp": "00:46:46",
+      "event_type": "teammate_save",
+      "event_label": "Teammate save",
+      "source": "eklipse_summary_text"
+    },
+    {
+      "timestamp_sec": 4136.0,
+      "timestamp": "01:08:56",
+      "event_type": "teammate_save",
+      "event_label": "Teammate save",
+      "source": "eklipse_summary_text",
+      "notes": "Same timestamp as the start of a supplied exported clip labeled Multi kill - 3x; retain both observations for later verification."
+    }
+  ],
+  "reported_improvement_insights": [
+    {
+      "insight_type": "ultimate_management",
+      "summary": "Frequent instances of ultimate not ready were reported; Eklipse recommended focusing on ultimate economy, timing, enemy ult tracking, and coordination.",
+      "timestamp_specific": false,
+      "source": "eklipse_summary_text"
+    },
+    {
+      "insight_type": "positioning_and_survivability",
+      "summary": "Eklipse reported elimination events around 01:21:30 and 01:21:00 and recommended reviewing positioning, awareness, and disengage timing.",
+      "timestamp_specific": true,
+      "supporting_events": [
+        {
+          "timestamp_sec": 4890.0,
+          "timestamp": "01:21:30",
+          "event_type": "be_eliminated"
+        },
+        {
+          "timestamp_sec": 4860.0,
+          "timestamp": "01:21:00",
+          "event_type": "be_eliminated"
+        }
+      ],
+      "source": "eklipse_summary_text"
+    }
+  ],
+  "target_output_capabilities": [
+    "Identify major highlight events with timestamps.",
+    "Group repeated high-value events into a session takeaway.",
+    "Identify useful negative events such as eliminations or missed ultimate readiness.",
+    "Produce constructive improvement suggestions grounded in detected evidence.",
+    "Generate a natural-language post-session summary similar in usefulness to Eklipse."
+  ]
+}

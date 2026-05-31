@@ -142,7 +142,7 @@ Eklipse's Overwatch guide states that it reads visible HUD elements. Your detect
 
 ## 3.2 Major blockers before 1:1 parity
 
-- [ ] **REQUIRED:** No Eklipse-vs-local benchmark tool exists yet.
+- [x] **Eklipse-vs-local benchmark tool:** Implemented in `src/automakeclip/benchmark.py` with `automakeclip-parity` CLI.
 - [ ] **REQUIRED:** If SteelSeries event candidates exist, the current detector returns those instead of also using strong non-kill visual/audio highlight candidates.
 - [ ] **REQUIRED:** Metadata parsing currently imports only `KILL` events.
 - [ ] **REQUIRED:** Current core detection mostly measures HUD motion rather than understanding semantic gameplay events.
@@ -283,8 +283,8 @@ Dataset coverage:
 ### For each VOD
 
 - [ ] Keep an unchanged raw input named consistently, such as `vod_001_source.mp4`.
-- [ ] Run that same file through Eklipse.
-- [ ] Record every Eklipse clip's:
+- [x] Run that same file through Eklipse.
+- [x] Record every Eklipse clip's:
   - rank/order,
   - start timestamp,
   - end timestamp,
@@ -292,6 +292,7 @@ Dataset coverage:
   - crop/layout/template,
   - captions/title/effects,
   - music/audio behavior if used.
+  - **VOD 001 status:** 13 exported clips recorded in `references/vod_001_eklipse.json`. Rank values are null (display order unconfirmed). Session summary recorded separately.
 - [ ] Run current AutoMakeClip against the same input.
 - [ ] Save local `.plan.json`.
 - [ ] Save local and Eklipse vertical renders together for comparison.
@@ -335,8 +336,9 @@ benchmarks/
 
 **Exit gate:**
 
-- [ ] At least 10 reference VODs captured.
-- [ ] At least 30 total Eklipse-selected clip examples recorded.
+- [x] VOD 001 reference data captured (13 exported clips + session summary).
+- [ ] At least 10 reference VODs captured (1 of 10 complete).
+- [ ] At least 30 total Eklipse-selected clip examples recorded (13 of 30 recorded).
 - [ ] Examples include non-simple-kill moments such as ult/team fight/clutch/fail.
 
 ---
@@ -347,36 +349,42 @@ benchmarks/
 
 ### New implementation
 
-- [ ] Add `src/automakeclip/parity.py`.
-- [ ] Add a command such as:
+- [x] Add `src/automakeclip/benchmark.py` (parity comparison engine).
+- [x] Add CLI command:
 
 ```bash
 automakeclip-parity \
-  --benchmark benchmarks/overwatch_eklipse_parity \
-  --report output/parity_report.md
+  --eklipse references/vod_001_eklipse.json \
+  --local output/vod_001_local.plan.json \
+  --report reports/vod_001_report.md
 ```
 
-- [ ] Add `tests/test_parity.py`.
+- [x] Add `tests/test_benchmark.py` (55 tests covering IoU, matching, event groups, rank, loaders, report generation).
 
 ### Report metrics
 
-- [ ] **Moment recall:** Eklipse moments matched by local output.
-- [ ] **Moment precision:** Local selected clips that match Eklipse selections.
-- [ ] **Missed moments:** Eklipse clips not locally detected.
-- [ ] **Weak extras:** Local clips not present in Eklipse choices.
-- [ ] **Rank agreement:** Whether the best moments are prioritized similarly.
-- [ ] **Start-time error.**
-- [ ] **End-time error.**
-- [ ] **Duration difference.**
-- [ ] **Event-type mismatch:** e.g. Eklipse selected an ult play but local treated it as generic motion.
+- [x] **Moment recall:** Eklipse moments matched by local output.
+- [x] **Moment precision:** Local selected clips that match Eklipse selections.
+- [x] **Missed moments:** Eklipse clips not locally detected.
+- [x] **Weak extras:** Local clips not present in Eklipse choices.
+- [x] **Rank agreement:** Whether the best moments are prioritized similarly (omitted when rank is null).
+- [x] **Start-time error.**
+- [x] **End-time error.**
+- [ ] **Duration difference:** Not yet computed in the report (low priority).
+- [ ] **Event-type mismatch:** Not yet computed in the report.
 
 ### Repeatable clip matching rule
 
-- [ ] Count a local clip as matching an Eklipse clip when either:
+- [x] Count a local clip as matching an Eklipse clip when either:
   - clip time intersection-over-union is at least `0.50`, or
   - highlight anchor timestamps are within `2.0` seconds.
-- [ ] Allow one-to-one matching only; do not let one local clip satisfy several unrelated Eklipse clips.
-- [ ] Output exact timestamps for every miss and extra.
+- [x] Allow one-to-one matching only; do not let one local clip satisfy several unrelated Eklipse clips.
+- [x] Output exact timestamps for every miss and extra.
+
+### Unique-event-group comparison (implemented)
+
+- [x] Multiple overlapping Eklipse exports within the same `event_group` count as one detected event.
+- [x] Unique-event-group recall reported separately from export-window recall.
 
 ### Example report summary
 
@@ -694,15 +702,60 @@ Music support is already relatively developed in this branch; tune it after sele
 
 ---
 
+## Phase 10 — Session-summary and coaching parity (future)
+
+**Purpose:** Beyond clip-selection parity, AutoMakeClip should build a detected event timeline and generate post-session insights similar to Eklipse's AI session summary.
+
+This phase is documented as a future requirement. It should NOT be started until clip-selection parity (Phases 2–5) is measured and strong.
+
+### 10.1 Detected session event timeline
+
+- [ ] **REQUIRED:** Build a structured timeline of detected gameplay events for each processed VOD.
+- [ ] Event types to track: multi-kills, ultimate plays, teammate saves, eliminations (deaths), objective changes, clutch survivals.
+- [ ] Each event should have: timestamp, event_type, confidence, supporting evidence.
+- [ ] Store the event timeline alongside the `.plan.json` output.
+
+### 10.2 Eklipse-style post-game summary generation
+
+- [ ] **REQUIRED:** Generate a natural-language post-session summary from the detected event timeline.
+- [ ] Summarize major highlight events with timestamps.
+- [ ] Group repeated high-value events into session takeaways (e.g. "multiple sextuple kills near the start").
+- [ ] Identify useful negative events: eliminations (deaths), missed ultimate readiness, positioning mistakes.
+- [ ] Produce constructive improvement suggestions grounded in detected evidence.
+
+### 10.3 Coaching insight parity with Eklipse
+
+- [ ] **REQUIRED:** Match the type and usefulness of insights Eklipse's AI session summary provides:
+  - multi-kills and highlight moments,
+  - teammate saves and support plays,
+  - ultimate economy / "ultimate not ready" observations,
+  - player eliminations and survivability review,
+  - positioning and disengage timing feedback.
+- [ ] **REQUIRED:** Ground every insight in actual detected evidence, not generic advice.
+- [ ] Compare local summary output against Eklipse session summary references (e.g. `vod_001_eklipse_session_summary.json`).
+
+### Reference data for this phase
+
+- `references/vod_001_eklipse_session_summary.json` — Eklipse AI-reported events and coaching insights.
+- Additional session summary references should be collected alongside clip references for each VOD.
+
+**Exit gate:**
+
+- [ ] Local session timeline captures the same event categories Eklipse reports.
+- [ ] Post-session summary mentions the same key moments Eklipse highlights.
+- [ ] Coaching insights are grounded in evidence and match Eklipse's usefulness.
+
+---
+
 # 6. Immediate Coding Queue: What to Implement First
 
 ## Sprint 1 — Measurement and detector architecture
 
 - [ ] Create `eklipse-parity` branch from `MontageMAC`.
 - [ ] Clean generated/debug output tracking.
-- [ ] Create benchmark folder and Eklipse timestamp JSON format.
-- [ ] Implement `automakeclip-parity` report generation.
-- [ ] Add parity tests.
+- [x] Create benchmark folder and Eklipse timestamp JSON format.
+- [x] Implement `automakeclip-parity` report generation.
+- [x] Add parity tests.
 - [ ] Run current branch against initial paired reference VODs and record baseline metrics.
 - [ ] Refactor `analysis.py` so metadata clips and non-metadata visual/audio candidates are combined.
 - [ ] Save evidence explaining why each selected clip was chosen.
@@ -877,13 +930,13 @@ Copy this block for each major implementation change.
 
 - [ ] Create a new `eklipse-parity` development branch from `MontageMAC`.
 - [ ] Remove/ignore generated audio/debug artifacts.
-- [ ] Add benchmark folder and JSON format.
+- [x] Add benchmark folder and JSON format.
 - [ ] Choose your first 3 raw Overwatch VODs.
 - [ ] Run those same 3 VODs through Eklipse.
-- [ ] Record Eklipse timestamps, order and moment types.
+- [x] Record Eklipse timestamps, order and moment types for VOD 001.
 - [ ] Save Eklipse vertical export examples you want to match.
-- [ ] Run current AutoMakeClip against the same VODs and save baseline results.
-- [ ] Implement parity report tool.
+- [ ] Run current AutoMakeClip against VOD 001 and save baseline results.
+- [x] Implement parity report tool.
 - [ ] Record baseline metrics.
 - [ ] Refactor detector candidate fusion so metadata does not block non-kill moments.
 - [ ] Rerun parity report.

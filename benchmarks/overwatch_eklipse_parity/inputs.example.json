@@ -1,16 +1,29 @@
 [
   {
     "vod_id": "vod_001",
+    "platform": "youtube",
     "url": "https://www.youtube.com/watch?v=EXAMPLE_001",
+    "purpose": "parity_benchmark",
+    "clip_type": "full_vod",
     "title": "Example Overwatch VOD #1",
-    "duration_sec": 1200,
-    "notes": "Replace with a real VOD URL"
+    "notes": "Full VOD submitted to both Eklipse and AutoMakeClip for parity comparison"
   },
   {
     "vod_id": "vod_002",
-    "url": "https://www.youtube.com/watch?v=EXAMPLE_002",
+    "platform": "twitch",
+    "url": "https://www.twitch.tv/videos/EXAMPLE_002",
+    "purpose": "parity_benchmark",
+    "clip_type": "full_vod",
     "title": "Example Overwatch VOD #2",
-    "duration_sec": 900,
-    "notes": "Replace with a real VOD URL"
+    "notes": "Full Twitch VOD for parity testing"
+  },
+  {
+    "vod_id": "clip_style_001",
+    "platform": "youtube",
+    "url": "https://www.youtube.com/watch?v=EXAMPLE_CLIP",
+    "purpose": "style_reference",
+    "clip_type": "clip",
+    "title": "Example short clip for layout/caption reference",
+    "notes": "Pre-cut clip — use only for visual style testing, NOT parity comparison"
   }
 ]
