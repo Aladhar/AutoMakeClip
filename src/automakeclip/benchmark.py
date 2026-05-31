@@ -161,17 +161,30 @@ def _compute_iou(start_a: float, end_a: float, start_b: float, end_b: float) -> 
 # ---------------------------------------------------------------------------
 # Loaders
 # ---------------------------------------------------------------------------
-def load_eklipse_clips(path: Path) -> List[EklipseClip]:
+def load_eklipse_clips(path: Path, clip_window_sec: float = 10.0) -> List[EklipseClip]:
     """Load Eklipse exported clips from a JSON file.
 
-    Supports both list-at-root and ``{"clips": [...]}`` wrapper formats.
+    Supports three formats:
+
+    1. List at root: ``[{...}, ...]``
+    2. Dict with ``"clips"`` key: ``{"clips": [{...}, ...]}``
+    3. Session summary dict with ``"reported_highlight_events"`` key:
+       Each event has ``timestamp_sec`` but no end time.  We create
+       approximate clip windows of ``clip_window_sec`` seconds on each
+       side of the anchor.
     """
     data = json.loads(path.read_text(encoding="utf-8"))
 
+    clips_raw: list = []
     if isinstance(data, list):
         clips_raw = data
     elif isinstance(data, dict):
         clips_raw = data.get("clips", [])
+        # Session summary format — convert timestamps to clip windows
+        if not clips_raw and "reported_highlight_events" in data:
+            clips_raw = _session_events_to_clip_refs(
+                data["reported_highlight_events"], clip_window_sec
+            )
     else:
         raise ValueError(f"Unexpected Eklipse reference structure in {path}")
 
@@ -183,12 +196,49 @@ def load_eklipse_clips(path: Path) -> List[EklipseClip]:
                 end_sec=float(entry.get("end_sec", entry.get("end", 0.0))),
                 event_type=str(entry.get("event_type", "")),
                 event_group=str(entry.get("event_group", "")),
-                label=str(entry.get("label", "")),
+                label=str(entry.get("label", entry.get("event_label", ""))),
                 rank=entry.get("rank"),
                 notes=str(entry.get("notes", "")),
             )
         )
     return clips
+
+
+def _session_events_to_clip_refs(
+    events: list, clip_window_sec: float
+) -> list:
+    """Convert session-summary timestamp events into approximate clip refs.
+
+    Each event ``timestamp_sec`` becomes the anchor of a
+    ``[anchor - clip_window_sec, anchor + clip_window_sec]`` window.
+    Events sharing the same ``event_type`` within close proximity are
+    grouped into the same ``event_group``.
+    """
+    refs: list = []
+    # Group by event_type, assigning event_group ids
+    group_counters: Dict[str, int] = {}
+    for event in events:
+        ts = float(event.get("timestamp_sec", 0.0))
+        event_type = str(event.get("event_type", ""))
+        event_label = str(event.get("event_label", event.get("label", "")))
+
+        # Build event_group key: type + sequential id
+        group_key = event_type if event_type else "unknown"
+        if group_key not in group_counters:
+            group_counters[group_key] = 0
+        group_counters[group_key] += 1
+        event_group = f"{group_key}_{group_counters[group_key]:03d}"
+
+        refs.append({
+            "start_sec": max(0.0, ts - clip_window_sec),
+            "end_sec": ts + clip_window_sec,
+            "event_type": event_type,
+            "event_group": event_group,
+            "label": event_label,
+            "rank": None,
+            "notes": str(event.get("notes", "")),
+        })
+    return refs
 
 
 def load_local_plan(path: Path) -> List[LocalClip]:
