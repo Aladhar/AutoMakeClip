@@ -17,3 +17,9 @@ music_library/*.wav
 music_library/*.m4a
 music_library/*.aac
 music_library/*.flac
+
+# Benchmark private inputs
+benchmarks/overwatch_eklipse_parity/local_inputs.json
+benchmarks/overwatch_eklipse_parity/downloads/
+benchmarks/overwatch_eklipse_parity/exports/
+.automakeclip_downloads/

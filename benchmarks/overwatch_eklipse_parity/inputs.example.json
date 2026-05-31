@@ -1,0 +1,16 @@
+[
+  {
+    "vod_id": "vod_001",
+    "url": "https://www.youtube.com/watch?v=EXAMPLE_001",
+    "title": "Example Overwatch VOD #1",
+    "duration_sec": 1200,
+    "notes": "Replace with a real VOD URL"
+  },
+  {
+    "vod_id": "vod_002",
+    "url": "https://www.youtube.com/watch?v=EXAMPLE_002",
+    "title": "Example Overwatch VOD #2",
+    "duration_sec": 900,
+    "notes": "Replace with a real VOD URL"
+  }
+]

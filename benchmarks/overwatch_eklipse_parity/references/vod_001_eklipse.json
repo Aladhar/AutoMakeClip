@@ -1,0 +1,14 @@
+[
+  {
+    "start_sec": 120.5,
+    "end_sec": 135.2,
+    "label": "teamfight_win",
+    "notes": "Eklipse marked this as a top play"
+  },
+  {
+    "start_sec": 480.0,
+    "end_sec": 498.7,
+    "label": "multikill",
+    "notes": "Triple kill during payload push"
+  }
+]

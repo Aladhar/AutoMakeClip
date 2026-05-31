@@ -1,0 +1,14 @@
+[
+  {
+    "start_sec": 65.3,
+    "end_sec": 78.9,
+    "label": "streak",
+    "notes": "Five-player kill streak"
+  },
+  {
+    "start_sec": 312.0,
+    "end_sec": 328.4,
+    "label": "clutch_rez",
+    "notes": "Mercy clutch resurrection during overtime"
+  }
+]
