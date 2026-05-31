@@ -2,9 +2,10 @@
 
 Supports two comparison modes:
   1. **export-window comparison** — did AutoMakeClip produce comparable individual selected windows?
-  2. **unique-event-group comparison** — did AutoMakeClip detect the underlying important moment at least once?
+  2. **event-detection coverage** — did any local clip anchor fall inside the Eklipse export window?
+  3. **unique-event-group comparison** — did AutoMakeClip detect the underlying important moment at least once?
 
-Matching rules:
+Matching rules (strict export-window):
   - A local clip matches an Eklipse exported clip when:
       IoU ≥ 0.50  OR  highlight-anchor timestamps are within 2.0 seconds.
   - One local clip must not satisfy multiple unrelated unique event groups.
@@ -12,9 +13,16 @@ Matching rules:
     as one detected underlying moment in event-group metrics.
   - ``rank`` is treated as unknown when null/missing; rank metrics are omitted in that case.
 
-Clip types:
-  - ``parity_benchmark`` entries use full VODs and participate in parity comparison.
-  - ``style_reference`` entries (already-shortened clips) are skipped by the parity report.
+Event-detection coverage:
+  - A local clip counts as *detecting* an Eklipse event when its ``highlight_time``
+    (or midpoint when ``highlight_time`` is absent) falls inside the Eklipse export
+    window, optionally with a small tolerance.
+  - Detected-but-badly-trimmed = event detected but no strict export-window match.
+
+Reference file types:
+  - ``*_exports_raw.json`` — literal Eklipse exported clip windows (may include Training Range).
+  - ``*_gameplay_only.json`` — primary desired-real-game benchmark (no Training Range).
+  - ``*_session_summary.json`` — AI session insights; must NOT be used as clip-window input.
 """
 from __future__ import annotations
 
@@ -31,6 +39,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 # ---------------------------------------------------------------------------
 IOU_THRESHOLD = 0.50
 ANCHOR_DISTANCE_THRESHOLD_SEC = 2.0
+EVENT_DETECTION_TOLERANCE_SEC = 0.0  # no extra tolerance; anchor must be inside window
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +102,17 @@ class ExportWindowMatch:
 
 
 @dataclass
+class EventDetectionDetail:
+    """Per-clip event-detection result."""
+
+    eklipse_clip: EklipseClip
+    detected: bool = False
+    strictly_matched: bool = False
+    detected_by_label: str = ""
+    detecting_local_anchor: Optional[float] = None
+
+
+@dataclass
 class EventGroupResult:
     """Result of unique-event-group comparison."""
 
@@ -130,6 +150,13 @@ class ParityReport:
     unique_event_recall: float = 0.0
     event_group_results: List[EventGroupResult] = field(default_factory=list)
 
+    # Event-detection coverage (separate from strict export-window matching)
+    event_detected_count: int = 0
+    event_missed_count: int = 0
+    event_detection_recall: float = 0.0
+    detected_but_badly_trimmed: int = 0  # detected but no strict export match
+    event_detection_details: List[EventDetectionDetail] = field(default_factory=list)
+
     # Rank metrics (omitted when rank is not available)
     rank_available: bool = False
     rank_agreement_count: int = 0
@@ -158,20 +185,66 @@ def _compute_iou(start_a: float, end_a: float, start_b: float, end_b: float) -> 
     return intersection / union
 
 
+def _compute_event_detection_details(
+    eklipse_clips: List[EklipseClip],
+    local_clips: List[LocalClip],
+    strict_matched_indices: set,
+) -> List[EventDetectionDetail]:
+    """Compute event-detection coverage for each Eklipse clip.
+
+    A local clip counts as *detecting* an Eklipse event when its
+    ``highlight_time`` (or midpoint) falls inside the Eklipse export
+    window, optionally with ``EVENT_DETECTION_TOLERANCE_SEC`` tolerance.
+    """
+    details: List[EventDetectionDetail] = []
+    for ec in eklipse_clips:
+        detected = False
+        detected_by_label = ""
+        detecting_anchor: Optional[float] = None
+
+        for lc in local_clips:
+            anchor = lc.anchor
+            # Check if anchor is inside the Eklipse window (with tolerance)
+            if (ec.start_sec - EVENT_DETECTION_TOLERANCE_SEC) <= anchor <= (
+                ec.end_sec + EVENT_DETECTION_TOLERANCE_SEC
+            ):
+                detected = True
+                detected_by_label = lc.label
+                detecting_anchor = anchor
+                break  # first detection is enough
+
+        details.append(
+            EventDetectionDetail(
+                eklipse_clip=ec,
+                detected=detected,
+                strictly_matched=False,  # filled in below
+                detected_by_label=detected_by_label,
+                detecting_local_anchor=detecting_anchor,
+            )
+        )
+
+    # Mark which detections are also strict export-window matches
+    for idx in strict_matched_indices:
+        if idx < len(details):
+            details[idx].strictly_matched = True
+
+    return details
+
+
 # ---------------------------------------------------------------------------
 # Loaders
 # ---------------------------------------------------------------------------
 def load_eklipse_clips(path: Path, clip_window_sec: float = 10.0) -> List[EklipseClip]:
     """Load Eklipse exported clips from a JSON file.
 
-    Supports three formats:
+    Supports formats:
 
     1. List at root: ``[{...}, ...]``
     2. Dict with ``"clips"`` key: ``{"clips": [{...}, ...]}``
-    3. Session summary dict with ``"reported_highlight_events"`` key:
-       Each event has ``timestamp_sec`` but no end time.  We create
-       approximate clip windows of ``clip_window_sec`` seconds on each
-       side of the anchor.
+
+    **Rejects** session-summary files (dict with ``"reported_highlight_events"``
+    but no ``"clips"``).  Pass session-summary files through
+    ``load_session_summary()`` instead.
     """
     data = json.loads(path.read_text(encoding="utf-8"))
 
@@ -180,10 +253,13 @@ def load_eklipse_clips(path: Path, clip_window_sec: float = 10.0) -> List[Eklips
         clips_raw = data
     elif isinstance(data, dict):
         clips_raw = data.get("clips", [])
-        # Session summary format — convert timestamps to clip windows
+        # Reject session-summary format — it is not exported clip data
         if not clips_raw and "reported_highlight_events" in data:
-            clips_raw = _session_events_to_clip_refs(
-                data["reported_highlight_events"], clip_window_sec
+            raise ValueError(
+                f"File {path} appears to be an Eklipse session summary "
+                f"(has 'reported_highlight_events' but no 'clips' key). "
+                f"Use an exported-clip reference file (*_exports_raw.json or "
+                f"*_gameplay_only.json) for clip-window parity comparison."
             )
     else:
         raise ValueError(f"Unexpected Eklipse reference structure in {path}")
@@ -340,32 +416,40 @@ def _match_clips(
 def _compute_event_group_results(
     eklipse_clips: List[EklipseClip],
     export_matches: List[ExportWindowMatch],
+    event_detection_details: Optional[List[EventDetectionDetail]] = None,
 ) -> List[EventGroupResult]:
     """Compute unique-event-group comparison.
 
     Clips sharing the same ``event_group`` string are considered part of the
-    same underlying event. If any clip in a group is matched, the event is
-    considered detected.
+    same underlying event.  If any clip in a group is *detected* (event-detection
+    coverage, not just strict export-window match), the event is considered found.
     """
     groups: Dict[str, List[int]] = {}
     for idx, clip in enumerate(eklipse_clips):
         group_key = clip.event_group or f"_ungrouped_{idx}"
         groups.setdefault(group_key, []).append(idx)
 
-    # Build a set of matched eklipse indices
-    matched_indices = {idx for idx, m in enumerate(export_matches) if m.matched}
+    # Build a set of detected eklipse indices (event-detection coverage)
+    detected_indices: set[int] = set()
+    if event_detection_details is not None:
+        for idx, detail in enumerate(event_detection_details):
+            if detail.detected:
+                detected_indices.add(idx)
+    else:
+        # Fallback: use strict export-window matches only
+        detected_indices = {idx for idx, m in enumerate(export_matches) if m.matched}
 
     results: List[EventGroupResult] = []
     for group_key, indices in groups.items():
         first_clip = eklipse_clips[indices[0]]
-        any_matched = any(idx in matched_indices for idx in indices)
+        any_detected = any(idx in detected_indices for idx in indices)
 
-        # Find the label of the local clip that matched (if any)
+        # Find the label of the detecting local clip (if any)
         matched_local_label = ""
-        if any_matched:
+        if any_detected and event_detection_details is not None:
             for idx in indices:
-                if idx in matched_indices and export_matches[idx].local_clip:
-                    matched_local_label = export_matches[idx].local_clip.label
+                if idx in detected_indices and event_detection_details[idx].detected_by_label:
+                    matched_local_label = event_detection_details[idx].detected_by_label
                     break
 
         results.append(
@@ -373,7 +457,7 @@ def _compute_event_group_results(
                 event_group=group_key,
                 event_type=first_clip.event_type,
                 label=first_clip.label,
-                matched=any_matched,
+                matched=any_detected,
                 matched_by_local_label=matched_local_label,
             )
         )
@@ -417,8 +501,22 @@ def generate_parity_report(
     recall = matched_count / eklipse_count if eklipse_count > 0 else 0.0
     precision = matched_count / local_count if local_count > 0 else 0.0
 
-    # Event-group comparison
-    event_group_results = _compute_event_group_results(eklipse_clips, export_matches)
+    # Event-detection coverage
+    strict_matched_indices = {idx for idx, m in enumerate(export_matches) if m.matched}
+    event_detection_details = _compute_event_detection_details(
+        eklipse_clips, local_clips, strict_matched_indices
+    )
+    event_detected = sum(1 for d in event_detection_details if d.detected)
+    event_missed = sum(1 for d in event_detection_details if not d.detected)
+    detected_badly_trimmed = sum(
+        1 for d in event_detection_details if d.detected and not d.strictly_matched
+    )
+    event_detection_recall = event_detected / eklipse_count if eklipse_count > 0 else 0.0
+
+    # Event-group comparison (uses event-detection coverage, not strict export-window)
+    event_group_results = _compute_event_group_results(
+        eklipse_clips, export_matches, event_detection_details
+    )
     unique_groups = len(event_group_results)
     matched_groups = sum(1 for r in event_group_results if r.matched)
     missed_groups = unique_groups - matched_groups
@@ -474,6 +572,11 @@ def generate_parity_report(
         export_matches=export_matches,
         missed_exports=[m.eklipse_clip for m in export_matches if not m.matched],
         extra_locals=extra_locals,
+        event_detected_count=event_detected,
+        event_missed_count=event_missed,
+        event_detection_recall=event_detection_recall,
+        detected_but_badly_trimmed=detected_badly_trimmed,
+        event_detection_details=event_detection_details,
         unique_event_group_count=unique_groups,
         matched_event_groups=matched_groups,
         missed_event_groups=missed_groups,
@@ -595,6 +698,29 @@ def render_report_markdown(report: ParityReport) -> str:
                 f"- **{clip.label}** at {_fmt_time(clip.start)}–{_fmt_time(clip.end)} (score={clip.score:.2f})"
             )
         lines.append("")
+
+    # --- Event-Detection Coverage ---
+    lines.append("## Event-Detection Coverage")
+    lines.append("")
+    lines.append(f"| Metric | Value |")
+    lines.append(f"|---|---|")
+    lines.append(f"| Detected events | {report.event_detected_count} |")
+    lines.append(f"| Missed events | {report.event_missed_count} |")
+    lines.append(f"| Event-detection recall | {report.event_detection_recall:.1%} |")
+    lines.append(f"| Detected but badly trimmed | {report.detected_but_badly_trimmed} |")
+    lines.append("")
+
+    if report.event_detection_details:
+        lines.append("| # | Eklipse Event | Detected? | Strict Match? | Detected By |")
+        lines.append("|---|---|---|---|---|")
+        for idx, detail in enumerate(report.event_detection_details, start=1):
+            detected_str = "Yes" if detail.detected else "No"
+            strict_str = "Yes" if detail.strictly_matched else "No"
+            label = detail.eklipse_clip.label or detail.eklipse_clip.event_type or "unknown"
+            lines.append(
+                f"| {idx} | {label} | {detected_str} | {strict_str} | {detail.detected_by_label or '—'} |"
+            )
+    lines.append("")
 
     # --- Event-group details ---
     lines.append("## Event-Group Details")

@@ -1,0 +1,119 @@
+[
+  {
+    "start_sec": 27.0,
+    "end_sec": 67.0,
+    "event_type": "sextuple_kill",
+    "event_group": "sextuple_kill_001",
+    "label": "Sextuple kill",
+    "rank": null,
+    "notes": "Training Range gameplay"
+  },
+  {
+    "start_sec": 56.0,
+    "end_sec": 87.0,
+    "event_type": "sextuple_kill",
+    "event_group": "sextuple_kill_002",
+    "label": "Sextuple kill",
+    "rank": null,
+    "notes": "Training Range gameplay"
+  },
+  {
+    "start_sec": 81.0,
+    "end_sec": 109.0,
+    "event_type": "sextuple_kill",
+    "event_group": "sextuple_kill_003",
+    "label": "Sextuple kill",
+    "rank": null,
+    "notes": "Training Range gameplay"
+  },
+  {
+    "start_sec": 94.0,
+    "end_sec": 116.0,
+    "event_type": "sextuple_kill",
+    "event_group": "sextuple_kill_004",
+    "label": "Sextuple kill",
+    "rank": null,
+    "notes": "Training Range gameplay"
+  },
+  {
+    "start_sec": 1075.0,
+    "end_sec": 1097.0,
+    "event_type": "triple_kill",
+    "event_group": "triple_kill_001",
+    "label": "Triple kill",
+    "rank": null,
+    "notes": ""
+  },
+  {
+    "start_sec": 3543.0,
+    "end_sec": 3565.0,
+    "event_type": "double_kill",
+    "event_group": "double_kill_001",
+    "label": "Double kill",
+    "rank": null,
+    "notes": ""
+  },
+  {
+    "start_sec": 4070.0,
+    "end_sec": 4118.0,
+    "event_type": "multi_kill",
+    "event_group": "multi_kill_001",
+    "label": "Multi kill - 3x",
+    "rank": null,
+    "notes": ""
+  },
+  {
+    "start_sec": 4136.0,
+    "end_sec": 4165.0,
+    "event_type": "multi_kill",
+    "event_group": "multi_kill_002",
+    "label": "Multi kill - 3x",
+    "rank": null,
+    "notes": ""
+  },
+  {
+    "start_sec": 4680.0,
+    "end_sec": 4710.0,
+    "event_type": "teammate_save",
+    "event_group": "teammate_save_001",
+    "label": "Teammate saves",
+    "rank": null,
+    "notes": ""
+  },
+  {
+    "start_sec": 4590.0,
+    "end_sec": 4620.0,
+    "event_type": "stream_moment",
+    "event_group": "stream_moment_001",
+    "label": "Stream moment",
+    "rank": null,
+    "notes": ""
+  },
+  {
+    "start_sec": 2800.0,
+    "end_sec": 2830.0,
+    "event_type": "stream_moment",
+    "event_group": "stream_moment_002",
+    "label": "Stream moment",
+    "rank": null,
+    "notes": ""
+  },
+  {
+    "start_sec": 4890.0,
+    "end_sec": 4920.0,
+    "event_type": "stream_moment",
+    "event_group": "stream_moment_003",
+    "label": "Stream moment",
+    "rank": null,
+    "notes": ""
+  },
+  {
+    "start_sec": 4860.0,
+    "end_sec": 4890.0,
+    "event_type": "stream_moment",
+    "event_group": "stream_moment_004",
+    "label": "Stream moment",
+    "rank": null,
+    "notes": ""
+  }
+]

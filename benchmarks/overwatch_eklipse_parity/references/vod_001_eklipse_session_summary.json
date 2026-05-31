@@ -11,7 +11,7 @@
   "capture_notes": [
     "This file stores Eklipse's AI-generated session interpretation, not only exported highlight clips.",
     "Events below were extracted from the Eklipse response supplied by the user.",
-    "Use selected clip exports in vod_001_eklipse.json for clip-window parity; use this file for session-summary/event-insight parity."
+    "Use selected clip exports in vod_001_eklipse_exports_raw.json for clip-window parity; use this file for session-summary/event-insight parity."
   ],
   "reported_highlight_events": [
     {
