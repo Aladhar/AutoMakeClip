@@ -1,4 +1,8 @@
 *.pyc
+benchmarks/*/downloads/
+benchmarks/*/review/vod_*/
+output/
+.automakeclip_downloads/
 .automakeclip_cache/02eb6a93593d7ec236f68b263f3ba2f51758ecfa.json
 .automakeclip_cache/0494e38dcad0c7f605ba0145800875dbdfee276e.json
 .automakeclip_cache/04f3a8a3a545233093aedf1e70acd795cdbcfcaf.json
