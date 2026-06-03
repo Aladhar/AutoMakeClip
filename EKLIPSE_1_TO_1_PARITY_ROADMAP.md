@@ -174,17 +174,20 @@ Notes and current state (audit: June 2, 2026):
   - unique Eklipse targets detected: **2 / 9**
   - strict export-window matches: **2 / 9**
 
-- After current kill-cam/dark-bottom-HUD rule applied (early Phase 4 experiment):
-  - selected clips: **45**
-  - extra local selections: **44**
-  - unique Eklipse targets detected: **1 / 9**
-  - strict export-window matches: **1 / 9**
+- The dark-bottom-HUD idea was investigated through ROI/debug review.
+- It was rejected as a detector signal because it returned maximal values for both valid gameplay samples and kill-cam-like samples, making it unreliable.
+- The previously observed 45-clip plan cannot be reproduced under current code and is not an accepted active baseline.
+- The current reproducible baseline is:
+  - selected clips: **57**
+  - extra local selections: **53**
+  - unique Eklipse targets detected: **2 / 9**
+  - strict export-window matches: **2 / 9**
 
-- Decision: **NARROW or REVERT**, not KEEP. The dark-bottom-HUD heuristic removed a number of extra clips but also **reduced** Eklipse target detection (harmful regression). The current rule is therefore unsuccessful-as-is and needs narrowing.
+- Decision: **REVERT**, not KEEP. The dark-bottom-HUD heuristic is not accepted in production behavior without stronger corroborating evidence.
 
 - Layout/caption/music parity: still uncollected / incomplete — do not proceed to Phases 5+ until detection parity is stabilized.
 
-- Quick next action (not implemented yet): propose and test a narrower rejection rule that requires dark/absent HUD *plus* corroborating death/spectator/respawn/kill-cam evidence or the rejection state to persist for multiple frames.
+- Quick next action (not implemented yet): use ROI review to identify stable explicit kill-cam markers (top-center replay/killcam label, spectator prompt, or sustained menu overlay), not bottom-HUD absence alone.
 
 - `.gitignore` cleanup plan: repository currently tracks many per-file cache artifacts; replace with a single folder ignore such as `.automakeclip_cache/` and add a short cleanup step in Phase 0.
 

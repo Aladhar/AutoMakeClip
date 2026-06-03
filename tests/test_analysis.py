@@ -4,7 +4,6 @@ import numpy as np
 
 from automakeclip.analysis import (
     _inactive_overlay_score,
-    _killcam_bottom_hud_absent_score,
     _robust_normalize,
     _smooth,
     collect_candidate_segments,
@@ -294,43 +293,16 @@ class AnalysisTests(unittest.TestCase):
         frame[y0:y1, x0:x1] = roi_bgr
         return frame
 
-    def test_killcam_rejects_dark_bottom_hud(self) -> None:
-        """1. Kill-cam frame with absent bottom HUD → strong inactive score."""
-        # Bright upper area + very dark bottom HUD region
-        frame = self._make_frame(fill_bgr=180, roi_bgr=5)
-        score = _killcam_bottom_hud_absent_score(frame)
-        # ROI is 100 % dim → score = min(1.0, (1.0 - 0.70) / 0.20) = 1.0
-        self.assertGreater(score, 0.0)
-        self.assertAlmostEqual(score, 1.0, places=2)
-
-    def test_killcam_accepts_normal_hud(self) -> None:
-        """2. Normal active gameplay with visible HUD → no rejection."""
-        frame = self._make_frame(fill_bgr=100, roi_bgr=200)
-        score = _killcam_bottom_hud_absent_score(frame)
-        # ROI pixels at 200/255 = 0.78 >> 0.12 dim threshold
+    def test_dark_bottom_hud_without_overlay_does_not_trigger_inactive_overlay(self) -> None:
+        """Dark bottom HUD alone should not produce a strong inactive overlay score."""
+        dark_frame = self._make_frame(fill_bgr=160, roi_bgr=5)
+        score = _inactive_overlay_score(dark_frame)
         self.assertEqual(score, 0.0)
 
-    def test_killcam_does_not_reject_dark_but_active(self) -> None:
-        """3. Dark scene with some HUD elements still visible → no rejection."""
-        frame = self._make_frame(fill_bgr=30, roi_bgr=60)
-        # roi_bgr=60 → brightness 60/255 = 0.235 > 0.12 → dim_fraction = 0
-        score = _killcam_bottom_hud_absent_score(frame)
-        self.assertEqual(score, 0.0)
-
-    def test_killcam_frame_triggers_inactive_overlay(self) -> None:
-        """4. Kill-cam/death-state frame → strong inactive overlay score."""
-        # Simulate kill-cam: bright gameplay area but dark bottom HUD
-        killcam_frame = self._make_frame(fill_bgr=160, roi_bgr=5)
-        score = _inactive_overlay_score(killcam_frame)
-        # The kill-cam detector should contribute meaningfully
-        self.assertGreater(score, 0.0)
-
-    def test_active_gameplay_not_rejected_by_killcam(self) -> None:
-        """5. Active multi-kill gameplay frame → low inactive overlay score."""
-        # Simulate active gameplay: bright scene + visible HUD elements
+    def test_active_gameplay_has_low_inactive_overlay_score(self) -> None:
+        """Active multi-kill gameplay frame should have low inactive overlay score."""
         active_frame = self._make_frame(fill_bgr=140, roi_bgr=180)
         score = _inactive_overlay_score(active_frame)
-        # Should not produce a strong inactive signal
         self.assertLess(score, 0.1)
 
     def test_eventless_generic_path_rejects_sustained_ui_churn_without_kill_burst(self) -> None:

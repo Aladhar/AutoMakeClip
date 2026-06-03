@@ -839,31 +839,11 @@ def _scoreboard_overlay_score(frame: np.ndarray) -> float:
     return 0.55 * tabs_score + 0.45 * panel_score
 
 
-def _killcam_bottom_hud_absent_score(frame: np.ndarray) -> float:
-    """
-    Detect kill-cam replay state by checking the bottom HUD region (health bar,
-    abilities, ult charge). During normal gameplay this region has visible
-    colored elements. During kill-cam replay the bottom HUD disappears,
-    leaving a dark bar. ROI: x=0.10..0.80, y=0.75..0.90 (ability bar area).
-    """
-    normalized = frame.astype(np.float32) / 255.0
-    region = _roi(normalized, (0.10, 0.75, 0.70, 0.15))
-    if region.size == 0:
-        return 0.0
-    brightness = region.mean(axis=2)
-    dim_threshold = 0.12
-    dim_fraction = float((brightness < dim_threshold).mean())
-    if dim_fraction > 0.70:
-        return min(1.0, (dim_fraction - 0.70) / 0.20)
-    return 0.0
-
-
 def _inactive_overlay_score(frame: np.ndarray) -> float:
     change_hero = _change_hero_prompt_score(frame)
     death_spectating = _death_spectating_score(frame)
     scoreboard = _scoreboard_overlay_score(frame)
-    killcam = _killcam_bottom_hud_absent_score(frame)
-    return max(change_hero, death_spectating, scoreboard, killcam)
+    return max(change_hero, death_spectating, scoreboard)
 
 
 def _orange_ui_ratio(region: np.ndarray) -> float:
