@@ -2,7 +2,15 @@ import unittest
 
 import numpy as np
 
-from automakeclip.analysis import _robust_normalize, _smooth, collect_candidate_segments, extract_borderline_review_segments, extract_candidate_segments
+from automakeclip.analysis import (
+    _inactive_overlay_score,
+    _killcam_bottom_hud_absent_score,
+    _robust_normalize,
+    _smooth,
+    collect_candidate_segments,
+    extract_borderline_review_segments,
+    extract_candidate_segments,
+)
 from automakeclip.config import AnalysisConfig
 from automakeclip.types import AnalysisTimeline, VideoMetadata
 
@@ -263,6 +271,67 @@ class AnalysisTests(unittest.TestCase):
         self.assertGreaterEqual(len(full_candidates), 2)
         self.assertTrue(all("Generic kill-heavy peak window." in candidate.note for candidate in full_candidates))
         self.assertTrue(all(candidate.duration <= 4.2 for candidate in full_candidates))
+
+    # ── Kill-cam rejection experiment tests ──────────────────────────────
+
+    def _make_frame(
+        self,
+        width: int = 1920,
+        height: int = 1080,
+        fill_bgr: int = 100,
+        roi_bgr: int = 10,
+        roi: tuple = (0.10, 0.75, 0.70, 0.15),
+    ) -> np.ndarray:
+        """Create a synthetic uint8 BGR frame with a uniform fill and a
+        differently-coloured rectangular ROI (for testing the kill-cam HUD
+        region)."""
+        frame = np.full((height, width, 3), fill_bgr, dtype=np.uint8)
+        x, y, w, h = roi
+        y0 = int(height * y)
+        y1 = int(height * (y + h))
+        x0 = int(width * x)
+        x1 = int(width * (x + w))
+        frame[y0:y1, x0:x1] = roi_bgr
+        return frame
+
+    def test_killcam_rejects_dark_bottom_hud(self) -> None:
+        """1. Kill-cam frame with absent bottom HUD → strong inactive score."""
+        # Bright upper area + very dark bottom HUD region
+        frame = self._make_frame(fill_bgr=180, roi_bgr=5)
+        score = _killcam_bottom_hud_absent_score(frame)
+        # ROI is 100 % dim → score = min(1.0, (1.0 - 0.70) / 0.20) = 1.0
+        self.assertGreater(score, 0.0)
+        self.assertAlmostEqual(score, 1.0, places=2)
+
+    def test_killcam_accepts_normal_hud(self) -> None:
+        """2. Normal active gameplay with visible HUD → no rejection."""
+        frame = self._make_frame(fill_bgr=100, roi_bgr=200)
+        score = _killcam_bottom_hud_absent_score(frame)
+        # ROI pixels at 200/255 = 0.78 >> 0.12 dim threshold
+        self.assertEqual(score, 0.0)
+
+    def test_killcam_does_not_reject_dark_but_active(self) -> None:
+        """3. Dark scene with some HUD elements still visible → no rejection."""
+        frame = self._make_frame(fill_bgr=30, roi_bgr=60)
+        # roi_bgr=60 → brightness 60/255 = 0.235 > 0.12 → dim_fraction = 0
+        score = _killcam_bottom_hud_absent_score(frame)
+        self.assertEqual(score, 0.0)
+
+    def test_killcam_frame_triggers_inactive_overlay(self) -> None:
+        """4. Kill-cam/death-state frame → strong inactive overlay score."""
+        # Simulate kill-cam: bright gameplay area but dark bottom HUD
+        killcam_frame = self._make_frame(fill_bgr=160, roi_bgr=5)
+        score = _inactive_overlay_score(killcam_frame)
+        # The kill-cam detector should contribute meaningfully
+        self.assertGreater(score, 0.0)
+
+    def test_active_gameplay_not_rejected_by_killcam(self) -> None:
+        """5. Active multi-kill gameplay frame → low inactive overlay score."""
+        # Simulate active gameplay: bright scene + visible HUD elements
+        active_frame = self._make_frame(fill_bgr=140, roi_bgr=180)
+        score = _inactive_overlay_score(active_frame)
+        # Should not produce a strong inactive signal
+        self.assertLess(score, 0.1)
 
     def test_eventless_generic_path_rejects_sustained_ui_churn_without_kill_burst(self) -> None:
         timeline = AnalysisTimeline(

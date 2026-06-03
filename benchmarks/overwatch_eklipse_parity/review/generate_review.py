@@ -59,9 +59,11 @@ def extract_preview(start_sec: float, duration_sec: float, output_path: Path, ma
         "-ss", str(start_sec),
         "-i", str(VOD_PATH),
         "-t", str(duration_sec),
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
         "-vf", f"scale={max_width}:-2",
         "-c:v", "libx264", "-preset", "fast", "-crf", "28",
-        "-c:a", "aac", "-b:a", "64k",
+        "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart",
         str(output_path),
     ]
