@@ -40,6 +40,7 @@ class Segment:
     note: str = ""
     source_path: Optional[str] = None
     highlight_time: Optional[float] = None
+    candidate_type: Optional[str] = None
 
     @property
     def duration(self) -> float:
@@ -48,6 +49,8 @@ class Segment:
     def to_dict(self) -> Dict[str, object]:
         payload = asdict(self)
         payload["duration"] = round(self.duration, 3)
+        if payload.get("candidate_type") is None:
+            payload.pop("candidate_type", None)
         return payload
 
 

@@ -1,3 +1,4 @@
+import inspect
 import unittest
 
 import numpy as np
@@ -185,6 +186,103 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(candidates)
         self.assertTrue(any("Generic" in candidate.note for candidate in candidates))
         self.assertTrue(any(candidate.highlight_time is not None for candidate in candidates))
+
+    def test_sustained_branch_generates_multikill_candidate_for_repeated_bursts(self) -> None:
+        timeline = AnalysisTimeline(
+            times=[float(index * 2) for index in range(30)],
+            visual_motion=[0.1] * 30,
+            killfeed_motion=[0.05 if index not in {10, 12, 14} else 0.9 for index in range(30)],
+            hud_motion=[0.05 if index not in {10, 12, 14} else 0.8 for index in range(30)],
+            center_motion=[0.05 if index not in {10, 12, 14} else 0.7 for index in range(30)],
+            audio_rms=[0.02 if index not in {10, 12, 14} else 0.45 for index in range(30)],
+            audio_flux=[0.01 if index not in {10, 12, 14} else 0.4 for index in range(30)],
+            scene_change=[0.01] * 30,
+            gameplay_confidence=[0.2 if index not in {10, 12, 14} else 0.8 for index in range(30)],
+            scores=[0.1 if index not in {10, 12, 14} else 1.1 for index in range(30)],
+            duration=60.0,
+        )
+        metadata = VideoMetadata(duration=60.0, width=1920, height=1080, fps=60.0)
+
+        config = AnalysisConfig()
+        config.enable_sustained_multikill_candidates = True
+        candidates = extract_candidate_segments(timeline, metadata, config)
+
+        sustained = [candidate for candidate in candidates if candidate.candidate_type == "sustained_multikill"]
+        self.assertTrue(sustained)
+        self.assertTrue(any(candidate.duration > 4.1 for candidate in sustained))
+
+    def test_sustained_branch_rejects_single_isolated_spikes(self) -> None:
+        timeline = AnalysisTimeline(
+            times=[float(index * 2) for index in range(30)],
+            visual_motion=[0.1] * 30,
+            killfeed_motion=[0.05 if index != 15 else 1.0 for index in range(30)],
+            hud_motion=[0.05 if index != 15 else 0.9 for index in range(30)],
+            center_motion=[0.05 if index != 15 else 0.8 for index in range(30)],
+            audio_rms=[0.02 if index != 15 else 0.55 for index in range(30)],
+            audio_flux=[0.01 if index != 15 else 0.45 for index in range(30)],
+            scene_change=[0.01] * 30,
+            gameplay_confidence=[0.2 if index != 15 else 0.85 for index in range(30)],
+            scores=[0.1 if index != 15 else 1.3 for index in range(30)],
+            duration=60.0,
+        )
+        metadata = VideoMetadata(duration=60.0, width=1920, height=1080, fps=60.0)
+
+        config = AnalysisConfig()
+        config.enable_sustained_multikill_candidates = True
+        candidates = extract_candidate_segments(timeline, metadata, config)
+
+        sustained = [candidate for candidate in candidates if candidate.candidate_type is not None]
+        self.assertFalse(sustained)
+
+    def test_sustained_candidate_anchor_and_wider_window(self) -> None:
+        timeline = AnalysisTimeline(
+            times=[float(index * 2) for index in range(40)],
+            visual_motion=[0.1] * 40,
+            killfeed_motion=[0.05 if index not in {12, 14, 16} else 0.85 for index in range(40)],
+            hud_motion=[0.05 if index not in {12, 14, 16} else 0.8 for index in range(40)],
+            center_motion=[0.05 if index not in {12, 14, 16} else 0.75 for index in range(40)],
+            audio_rms=[0.02 if index not in {12, 14, 16} else 0.45 for index in range(40)],
+            audio_flux=[0.01 if index not in {12, 14, 16} else 0.35 for index in range(40)],
+            scene_change=[0.01] * 40,
+            gameplay_confidence=[0.2 if index not in {12, 14, 16} else 0.8 for index in range(40)],
+            scores=[0.1 if index not in {12, 14, 16} else 1.1 for index in range(40)],
+            duration=80.0,
+        )
+        metadata = VideoMetadata(duration=80.0, width=1920, height=1080, fps=60.0)
+
+        config = AnalysisConfig()
+        config.enable_sustained_multikill_candidates = True
+        candidates = extract_candidate_segments(timeline, metadata, config)
+
+        sustained = [candidate for candidate in candidates if candidate.candidate_type == "sustained_multikill"]
+        self.assertTrue(sustained)
+        self.assertTrue(any(candidate.duration > 3.8 for candidate in sustained))
+        self.assertTrue(any(candidate.highlight_time in {24.0, 28.0, 32.0} for candidate in sustained))
+
+    def test_sustained_branch_disabled_by_default_preserves_generic_behavior(self) -> None:
+        timeline = AnalysisTimeline(
+            times=[float(index * 2) for index in range(30)],
+            visual_motion=[0.1] * 30,
+            killfeed_motion=[0.05 if index not in {10, 12, 14} else 0.9 for index in range(30)],
+            hud_motion=[0.05 if index not in {10, 12, 14} else 0.8 for index in range(30)],
+            center_motion=[0.05 if index not in {10, 12, 14} else 0.7 for index in range(30)],
+            audio_rms=[0.02 if index not in {10, 12, 14} else 0.45 for index in range(30)],
+            audio_flux=[0.01 if index not in {10, 12, 14} else 0.4 for index in range(30)],
+            scene_change=[0.01] * 30,
+            gameplay_confidence=[0.2 if index not in {10, 12, 14} else 0.8 for index in range(30)],
+            scores=[0.1 if index not in {10, 12, 14} else 1.1 for index in range(30)],
+            duration=60.0,
+        )
+        metadata = VideoMetadata(duration=60.0, width=1920, height=1080, fps=60.0)
+
+        candidates = extract_candidate_segments(timeline, metadata, AnalysisConfig())
+        self.assertFalse(any(candidate.candidate_type for candidate in candidates))
+
+    def test_analysis_module_contains_no_eklipse_reference(self) -> None:
+        import automakeclip.analysis as analysis_module
+
+        self.assertNotIn("vod_001_eklipse", inspect.getsource(analysis_module).lower())
+        self.assertNotIn("eklipse_gameplay_only", inspect.getsource(analysis_module).lower())
 
     def test_rejects_scene_only_spikes_without_fight_consensus(self) -> None:
         timeline = AnalysisTimeline(

@@ -115,7 +115,11 @@ def extract_candidate_segments(timeline: AnalysisTimeline, metadata: VideoMetada
         return list(event_candidates)
 
     generic_peak_candidates = _extract_generic_peak_segments(timeline, metadata, config)
-    return list(generic_peak_candidates)
+    if not config.enable_sustained_multikill_candidates:
+        return list(generic_peak_candidates)
+
+    sustained_candidates = _extract_sustained_multikill_segments(timeline, metadata, config)
+    return list(generic_peak_candidates) + list(sustained_candidates)
 
 
 def extract_borderline_review_segments(
@@ -668,6 +672,144 @@ def _extract_generic_peak_segments(timeline: AnalysisTimeline, metadata: VideoMe
     return segments
 
 
+def _extract_sustained_multikill_segments(timeline: AnalysisTimeline, metadata: VideoMetadata, config: AnalysisConfig) -> List[Segment]:
+    times = np.array(timeline.times, dtype=np.float32)
+    scores = np.array(timeline.scores, dtype=np.float32)
+    gameplay = np.array(timeline.gameplay_confidence, dtype=np.float32)
+    killfeed = np.array(timeline.killfeed_motion, dtype=np.float32)
+    center = np.array(timeline.center_motion, dtype=np.float32)
+    audio_flux = np.array(timeline.audio_flux, dtype=np.float32)
+
+    positive_killfeed = np.clip(_robust_normalize(killfeed), 0.0, None)
+    positive_killfeed_burst = np.clip(_robust_normalize(_local_burst_signal(killfeed, radius=3)), 0.0, None)
+    positive_center = np.clip(_robust_normalize(center), 0.0, None)
+    positive_center_burst = np.clip(_robust_normalize(_local_burst_signal(center, radius=3)), 0.0, None)
+    positive_audio = np.clip(_robust_normalize(audio_flux), 0.0, None)
+    positive_scores = np.clip(_robust_normalize(scores), 0.0, None)
+
+    sustained_signal = (
+        0.22 * positive_killfeed
+        + 0.18 * positive_killfeed_burst
+        + 0.18 * positive_center
+        + 0.12 * positive_center_burst
+        + 0.10 * positive_audio
+        + 0.08 * positive_scores
+    )
+    threshold = np.percentile(sustained_signal, config.sustained_candidate_peak_threshold_percentile)
+    gameplay_floor = np.percentile(gameplay, config.sustained_candidate_min_gameplay_percentile)
+
+    candidate_indices: List[int] = []
+    for index, value in enumerate(sustained_signal):
+        if value < threshold or gameplay[index] < gameplay_floor:
+            continue
+        left = sustained_signal[index - 1] if index > 0 else -np.inf
+        right = sustained_signal[index + 1] if index + 1 < len(sustained_signal) else -np.inf
+        if value < left or value < right:
+            continue
+        candidate_indices.append(index)
+
+    accepted_indices: List[int] = []
+    segments: List[Segment] = []
+    max_segments = 3
+    for index in sorted(candidate_indices, key=lambda item: sustained_signal[item], reverse=True):
+        peak_time = float(times[index])
+        if any(abs(peak_time - float(times[accepted])) < config.sustained_candidate_spacing_seconds for accepted in accepted_indices):
+            continue
+
+        window_half = config.sustained_candidate_window_seconds / 2.0
+        window_start = max(0.0, peak_time - window_half)
+        window_end = min(metadata.duration, peak_time + window_half)
+        left_index = int(np.searchsorted(times, window_start, side="left"))
+        right_index = int(np.searchsorted(times, window_end, side="right"))
+
+        if right_index <= left_index:
+            continue
+
+        window_killfeed = positive_killfeed[left_index:right_index]
+        window_burst = positive_killfeed_burst[left_index:right_index]
+        window_center = positive_center[left_index:right_index]
+        window_audio = positive_audio[left_index:right_index]
+        window_gameplay = gameplay[left_index:right_index]
+        window_sustained = sustained_signal[left_index:right_index]
+
+        if window_killfeed.size == 0:
+            continue
+
+        avg_killfeed = float(np.mean(window_killfeed))
+        avg_center = float(np.mean(window_center))
+        avg_audio = float(np.mean(window_audio))
+        avg_gameplay = float(np.mean(window_gameplay))
+        burst_count = int(np.sum(window_burst >= 0.18))
+        strong_peaks = int(np.sum(window_sustained >= threshold * 0.72))
+        sustained_ratio = float(np.mean(window_sustained >= threshold * 0.40))
+
+        if avg_killfeed < config.sustained_candidate_min_average_killfeed:
+            continue
+        if avg_center < config.sustained_candidate_min_average_center:
+            continue
+        if avg_audio < config.sustained_candidate_min_average_audio:
+            continue
+        if burst_count < config.sustained_candidate_min_burst_events:
+            continue
+        if strong_peaks < config.sustained_candidate_min_peak_count:
+            continue
+        if sustained_ratio < 0.28:
+            continue
+
+        window_left = index
+        window_right = index
+        floor = max(0.18, float(sustained_signal[index]) * 0.30)
+        while window_left > 0 and (peak_time - float(times[window_left - 1])) <= 4.0 and float(sustained_signal[window_left - 1]) >= floor:
+            window_left -= 1
+        while window_right + 1 < len(times) and (float(times[window_right + 1]) - peak_time) <= 5.5 and float(sustained_signal[window_right + 1]) >= floor:
+            window_right += 1
+
+        start = max(0.0, float(times[window_left]) - 1.1)
+        end = min(metadata.duration, float(times[window_right]) + 1.2)
+        segment_duration = end - start
+        if segment_duration < config.sustained_candidate_min_duration_seconds:
+            extension = (config.sustained_candidate_min_duration_seconds - segment_duration) / 2.0
+            start = max(0.0, start - extension)
+            end = min(metadata.duration, end + extension)
+        if segment_duration > config.sustained_candidate_max_duration_seconds:
+            half = config.sustained_candidate_max_duration_seconds / 2.0
+            start = max(0.0, peak_time - half)
+            end = min(metadata.duration, peak_time + half)
+
+        start, end = _clamp_segment(start, end, metadata.duration, config)
+
+        candidate_type = "sustained_multikill" if burst_count >= config.sustained_candidate_min_burst_events else "sustained_teamfight"
+        label = "highlight" if burst_count >= config.sustained_candidate_min_burst_events and avg_audio >= 0.14 else "fight"
+        note = (
+            f"Sustained {candidate_type} candidate. "
+            f"killfeed={avg_killfeed:.2f} burst={burst_count} center={avg_center:.2f} "
+            f"audio={avg_audio:.2f} gameplay={avg_gameplay:.2f}"
+        )
+
+        segments.append(
+            Segment(
+                start=start,
+                end=end,
+                score=(
+                    float(sustained_signal[index]) * 1.35
+                    + float(positive_scores[index]) * 0.75
+                    + float(positive_killfeed[index]) * 0.65
+                    + float(positive_audio[index]) * 0.50
+                    + max(float(gameplay[index]), 0.0) * 0.25
+                ),
+                label=label,
+                note=note,
+                highlight_time=peak_time,
+                candidate_type=candidate_type,
+            )
+        )
+        accepted_indices.append(index)
+        if len(segments) >= max_segments:
+            break
+
+    return segments
+
+
 def _event_weight(name: str) -> float:
     normalized = name.upper()
     if "PENTA" in normalized:
@@ -994,7 +1136,9 @@ def _big_play_segment_bounds(
     start = max(0.0, float(times[left]) - 0.55)
     end = min(duration, float(times[right]) + 0.90)
     segment_duration = end - start
-    max_big_play_seconds = min(config.max_segment_seconds, 4.2)
+    sustained_window = activity_signal[max(0, peak_index - 5) : min(len(times), peak_index + 6)]
+    sustained_ratio = float(np.mean(sustained_window >= max(0.28, float(activity_signal[peak_index]) * 0.35))) if sustained_window.size else 0.0
+    max_big_play_seconds = min(config.max_segment_seconds, 6.8 if sustained_ratio >= 0.35 else 4.2)
     if segment_duration > max_big_play_seconds:
         half = max_big_play_seconds / 2.0
         start = max(0.0, peak_time - half * 0.9)

@@ -1,0 +1,417 @@
+{
+  "baseline": {
+    "selected_local_clips": 57,
+    "extra_local_selections": 53,
+    "anchor_inside_local_detections": 4,
+    "unique_eklipse_targets_detected": "2 / 9",
+    "strict_matches": 2,
+    "core_kill_based_targets_detected": 0,
+    "core_kill_based_hits": {
+      "triple_kill_001": false,
+      "double_kill_001": false,
+      "multi_kill_001": false,
+      "multi_kill_002": false
+    },
+    "top_15_extras": [
+      {
+        "start": 3740.373947368421,
+        "end": 3742.3736842105263,
+        "score": 10.201197391748428,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 3741.25,
+        "duration": 2.0
+      },
+      {
+        "start": 3448.748947368421,
+        "end": 3450.7486842105263,
+        "score": 9.656324911117553,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 3449.5,
+        "duration": 2.0
+      },
+      {
+        "start": 3645.873947368421,
+        "end": 3647.8736842105263,
+        "score": 9.529564034938812,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 3646.75,
+        "duration": 2.0
+      },
+      {
+        "start": 3564.873947368421,
+        "end": 3566.8736842105263,
+        "score": 9.494065611064434,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 3565.75,
+        "duration": 2.0
+      },
+      {
+        "start": 3317.623947368421,
+        "end": 3319.6236842105263,
+        "score": 9.203518036007882,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 3318.5,
+        "duration": 2.0
+      },
+      {
+        "start": 2491.623947368421,
+        "end": 2493.6236842105263,
+        "score": 9.102268677577378,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 2492.25,
+        "duration": 2.0
+      },
+      {
+        "start": 1823.248947368421,
+        "end": 1825.2486842105263,
+        "score": 9.085256661474702,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 1824.0,
+        "duration": 2.0
+      },
+      {
+        "start": 3390.873947368421,
+        "end": 3392.8736842105263,
+        "score": 9.068630197644234,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 3391.5,
+        "duration": 2.0
+      },
+      {
+        "start": 2613.748947368421,
+        "end": 2615.7486842105263,
+        "score": 8.721072763204573,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 2614.5,
+        "duration": 2.0
+      },
+      {
+        "start": 3997.623947368421,
+        "end": 3999.6236842105263,
+        "score": 8.670954525470734,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 3998.5,
+        "duration": 2.0
+      },
+      {
+        "start": 3622.123947368421,
+        "end": 3624.1236842105263,
+        "score": 8.589009973406792,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 3622.75,
+        "duration": 2.0
+      },
+      {
+        "start": 2282.748947368421,
+        "end": 2284.7486842105263,
+        "score": 8.563172769546508,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 2283.5,
+        "duration": 2.0
+      },
+      {
+        "start": 1351.498947368421,
+        "end": 1353.4986842105263,
+        "score": 8.559236122295259,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 1352.25,
+        "duration": 2.0
+      },
+      {
+        "start": 2145.196447368421,
+        "end": 2147.173684210526,
+        "score": 8.488009802997112,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 2146.25,
+        "duration": 1.977
+      },
+      {
+        "start": 3879.373947368421,
+        "end": 3881.3736842105263,
+        "score": 8.458149880170822,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": "/Users/amritladhar/Documents/GitHub/AutoMakeClip/benchmarks/overwatch_eklipse_parity/downloads/vod.mp4",
+        "highlight_time": 3880.25,
+        "duration": 2.0
+      }
+    ]
+  },
+  "experiment": {
+    "selected_local_clips": 57,
+    "extra_local_selections": 53,
+    "anchor_inside_local_detections": 4,
+    "unique_eklipse_targets_detected": "2 / 9",
+    "strict_matches": 2,
+    "core_kill_based_targets_detected": 0,
+    "core_kill_based_hits": {
+      "triple_kill_001": false,
+      "double_kill_001": false,
+      "multi_kill_001": false,
+      "multi_kill_002": false
+    },
+    "top_15_extras": [
+      {
+        "start": 3740.4,
+        "end": 3742.2,
+        "score": 10.201197391748428,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 3741.25,
+        "duration": 1.8
+      },
+      {
+        "start": 3448.775,
+        "end": 3450.575,
+        "score": 9.656324911117553,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 3449.5,
+        "duration": 1.8
+      },
+      {
+        "start": 3645.9,
+        "end": 3647.7,
+        "score": 9.529564034938812,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 3646.75,
+        "duration": 1.8
+      },
+      {
+        "start": 3564.9,
+        "end": 3566.7,
+        "score": 9.494065611064434,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 3565.75,
+        "duration": 1.8
+      },
+      {
+        "start": 3317.65,
+        "end": 3319.45,
+        "score": 9.203518036007882,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 3318.5,
+        "duration": 1.8
+      },
+      {
+        "start": 2491.65,
+        "end": 2493.45,
+        "score": 9.102268677577378,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 2492.25,
+        "duration": 1.8
+      },
+      {
+        "start": 1823.275,
+        "end": 1825.075,
+        "score": 9.085256661474702,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 1824.0,
+        "duration": 1.8
+      },
+      {
+        "start": 3390.9,
+        "end": 3392.7,
+        "score": 9.068630197644234,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 3391.5,
+        "duration": 1.8
+      },
+      {
+        "start": 2613.775,
+        "end": 2615.575,
+        "score": 8.721072763204573,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 2614.5,
+        "duration": 1.8
+      },
+      {
+        "start": 3997.65,
+        "end": 3999.45,
+        "score": 8.670954525470734,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 3998.5,
+        "duration": 1.8
+      },
+      {
+        "start": 3622.15,
+        "end": 3623.95,
+        "score": 8.589009973406792,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 3622.75,
+        "duration": 1.8
+      },
+      {
+        "start": 2282.775,
+        "end": 2284.575,
+        "score": 8.563172769546508,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 2283.5,
+        "duration": 1.8
+      },
+      {
+        "start": 1351.525,
+        "end": 1353.325,
+        "score": 8.559236122295259,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 1352.25,
+        "duration": 1.8
+      },
+      {
+        "start": 2145.2,
+        "end": 2147.15,
+        "score": 8.488009802997112,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 2146.25,
+        "duration": 1.95
+      },
+      {
+        "start": 3879.4,
+        "end": 3881.2,
+        "score": 8.458149880170822,
+        "label": "highlight",
+        "note": "Generic kill-heavy peak window.",
+        "source_path": null,
+        "highlight_time": 3880.25,
+        "duration": 1.8
+      }
+    ]
+  },
+  "reference_windows": [
+    {
+      "start_sec": 1075.0,
+      "end_sec": 1097.0,
+      "event_type": "triple_kill",
+      "event_group": "triple_kill_001",
+      "label": "Triple kill",
+      "rank": null,
+      "notes": ""
+    },
+    {
+      "start_sec": 3543.0,
+      "end_sec": 3565.0,
+      "event_type": "double_kill",
+      "event_group": "double_kill_001",
+      "label": "Double kill",
+      "rank": null,
+      "notes": ""
+    },
+    {
+      "start_sec": 4070.0,
+      "end_sec": 4118.0,
+      "event_type": "multi_kill",
+      "event_group": "multi_kill_001",
+      "label": "Multi kill - 3x",
+      "rank": null,
+      "notes": ""
+    },
+    {
+      "start_sec": 4136.0,
+      "end_sec": 4165.0,
+      "event_type": "multi_kill",
+      "event_group": "multi_kill_002",
+      "label": "Multi kill - 3x",
+      "rank": null,
+      "notes": ""
+    },
+    {
+      "start_sec": 4680.0,
+      "end_sec": 4710.0,
+      "event_type": "teammate_save",
+      "event_group": "teammate_save_001",
+      "label": "Teammate saves",
+      "rank": null,
+      "notes": ""
+    },
+    {
+      "start_sec": 4590.0,
+      "end_sec": 4620.0,
+      "event_type": "stream_moment",
+      "event_group": "stream_moment_001",
+      "label": "Stream moment",
+      "rank": null,
+      "notes": ""
+    },
+    {
+      "start_sec": 2800.0,
+      "end_sec": 2830.0,
+      "event_type": "stream_moment",
+      "event_group": "stream_moment_002",
+      "label": "Stream moment",
+      "rank": null,
+      "notes": ""
+    },
+    {
+      "start_sec": 4890.0,
+      "end_sec": 4920.0,
+      "event_type": "stream_moment",
+      "event_group": "stream_moment_003",
+      "label": "Stream moment",
+      "rank": null,
+      "notes": ""
+    },
+    {
+      "start_sec": 4860.0,
+      "end_sec": 4890.0,
+      "event_type": "stream_moment",
+      "event_group": "stream_moment_004",
+      "label": "Stream moment",
+      "rank": null,
+      "notes": ""
+    }
+  ]
+}
