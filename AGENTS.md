@@ -17,22 +17,13 @@ Follow this order unless the user directly changes it:
 5. Improve vertical layouts, captions, overlays, and export quality.
 6. Polish music/audio and workflow features only after detection quality is measured and strong.
 
-## Required Workflow
 
-* Inspect relevant files before editing.
-* Do not guess existing functionality.
-* State which roadmap checkbox item is being worked on.
-* State exact files to change before editing.
-* Make minimal, focused edits.
-* Do not remove existing working features without explicit approval.
-* Add or update tests for implemented behavior.
-* Run the smallest relevant test suite after changes.
-* Update roadmap checkboxes only after implementation and verification.
-* Commit and push completed changes with a clear explanation.
+## Temporary Current Benchmark Guardrails
 
-## Important Restrictions
-
-* Do not claim Eklipse parity without benchmark evidence.
-* Do not let SteelSeries kill metadata exclude non-kill highlight candidates.
-* Do not prioritize cosmetic polish or music improvements over missing detector/parity requirements.
-* Do not commit generated videos, cached music, downloaded media, or debug-output artifacts unless explicitly requested.
+- Treat `benchmarks/overwatch_eklipse_parity/references/vod_001_eklipse_gameplay_only.json` as the primary VOD 001 product-quality benchmark.
+- Treat `vod_001_eklipse_exports_raw.json` as literal Eklipse behavior, including Training Range selections.
+- Treat `vod_001_eklipse_session_summary.json` as session-summary/coaching reference only; never use it as clip-window benchmark input.
+- Current reproducible VOD 001 baseline: 57 selected clips, 53 extras, 2/9 unique Eklipse targets detected, and 2/9 strict matches.
+- The dark-bottom-HUD kill-cam rejection idea was tested and rejected as non-discriminative. Do not reintroduce it without new visual evidence.
+- Do not expand clip timing/windows until target-moment detection and false-positive behavior are measured and improved.
+- Keep local VODs, generated plans, preview MP4s, contact sheets, caches, and diagnostic reports uncommitted.
