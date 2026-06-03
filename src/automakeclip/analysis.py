@@ -637,6 +637,16 @@ def _extract_generic_peak_segments(timeline: AnalysisTimeline, metadata: VideoMe
             config=config,
         )
         peak_strength = float(generic_signal[index])
+        if _is_short_isolated_peak(
+            positive_killfeed,
+            positive_center,
+            positive_hud,
+            positive_audio,
+            positive_scene,
+            activity_signal,
+            index,
+        ):
+            peak_strength *= 0.82
         label = "highlight" if (positive_killfeed[index] + 0.7 * positive_audio[index] + 0.35 * positive_hud[index]) >= 1.45 else "fight"
         note = "Generic kill-heavy peak window." if label == "highlight" else "Generic high-activity fight window."
         segments.append(
@@ -716,6 +726,27 @@ def _segment_around_peak(
     if (end - start) > config.max_segment_seconds:
         end = start + config.max_segment_seconds
     return Segment(start=start, end=end, score=peak_score, label=label, note=note, highlight_time=peak_time)
+
+
+def _is_short_isolated_peak(
+    positive_killfeed: np.ndarray,
+    positive_center: np.ndarray,
+    positive_hud: np.ndarray,
+    positive_audio: np.ndarray,
+    positive_scene: np.ndarray,
+    activity_signal: np.ndarray,
+    index: int,
+) -> bool:
+    if positive_killfeed[index] < 0.38 or positive_hud[index] < 0.30:
+        return False
+    short_neighborhood = activity_signal[max(0, index - 2) : min(len(activity_signal), index + 3)]
+    sustained_ratio = float(np.mean(short_neighborhood >= 0.28)) if short_neighborhood.size else 0.0
+    return (
+        positive_center[index] < 0.28
+        and positive_audio[index] < 0.16
+        and positive_scene[index] < 0.12
+        and sustained_ratio < 0.35
+    )
 
 
 def _clamp_segment(start: float, end: float, duration: float, config: AnalysisConfig) -> Tuple[float, float]:
