@@ -157,6 +157,37 @@ Eklipse's Overwatch guide states that it reads visible HUD elements. Your detect
 - [ ] Clean the repo: generated/debug music output was committed under `output_music_debug/`.
 - [ ] Correct or implement the README's OCR/“ScreenSense” claim; the audited core detector currently shows motion/color/audio analysis rather than a full OCR event-recognition path.
 
+## Kill-cam / dark-bottom-HUD rejection experiment (early Phase 4)
+
+Notes and current state (audit: June 2, 2026):
+
+- Corrected VOD 001 reference filenames saved in this repo under `benchmarks/overwatch_eklipse_parity/references/`:
+  - `vod_001_eklipse_exports_raw.json`
+  - `vod_001_eklipse_gameplay_only.json`
+  - `vod_001_eklipse_session_summary.json`
+
+- Benchmark / visual diagnostic setup: completed — parity report artifacts and review contact sheets exist under `benchmarks/overwatch_eklipse_parity/review/vod_001/`.
+
+- Baseline numbers (pre-experiment, from saved review):
+  - selected clips: **57**
+  - extra local selections (not associated with Eklipse): **53**
+  - unique Eklipse targets detected: **2 / 9**
+  - strict export-window matches: **2 / 9**
+
+- After current kill-cam/dark-bottom-HUD rule applied (early Phase 4 experiment):
+  - selected clips: **45**
+  - extra local selections: **44**
+  - unique Eklipse targets detected: **1 / 9**
+  - strict export-window matches: **1 / 9**
+
+- Decision: **NARROW or REVERT**, not KEEP. The dark-bottom-HUD heuristic removed a number of extra clips but also **reduced** Eklipse target detection (harmful regression). The current rule is therefore unsuccessful-as-is and needs narrowing.
+
+- Layout/caption/music parity: still uncollected / incomplete — do not proceed to Phases 5+ until detection parity is stabilized.
+
+- Quick next action (not implemented yet): propose and test a narrower rejection rule that requires dark/absent HUD *plus* corroborating death/spectator/respawn/kill-cam evidence or the rejection state to persist for multiple frames.
+
+- `.gitignore` cleanup plan: repository currently tracks many per-file cache artifacts; replace with a single folder ignore such as `.automakeclip_cache/` and add a short cleanup step in Phase 0.
+
 ## 3.3 Existing files to build on
 
 | File | Current role | What should be added next |
