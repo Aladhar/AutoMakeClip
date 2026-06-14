@@ -41,11 +41,38 @@ def sec_filename(seconds: float) -> str:
 
 
 def crop_filter(roi: Tuple[float, float, float, float], width: int, height: int) -> str:
-    x = int(width * roi[0])
-    y = int(height * roi[1])
-    w = int(width * roi[2])
-    h = int(height * roi[3])
+    x = max(0, int(width * roi[0]))
+    y = max(0, int(height * roi[1]))
+    w = max(1, int(width * roi[2]))
+    h = max(1, int(height * roi[3]))
+    if x + w > width:
+        w = width - x
+    if y + h > height:
+        h = height - y
     return f"crop={w}:{h}:{x}:{y},scale=640:-2"
+
+
+def get_video_dimensions(video_path: Path) -> Tuple[int, int]:
+    args = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "json",
+        str(video_path),
+    ]
+    result = subprocess.run(args, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffprobe failed: {result.stderr.strip()}")
+    info = json.loads(result.stdout)
+    stream = info.get("streams", [{}])[0]
+    width = int(stream.get("width", 640))
+    height = int(stream.get("height", 360))
+    return width, height
 
 
 def extract_preview(start_sec: float, duration_sec: float, output_path: Path, max_width: int = 640) -> bool:
@@ -113,6 +140,8 @@ def run() -> int:
     experiment_plan = json.loads(EXPERIMENT_PLAN_PATH.read_text(encoding="utf-8"))
     refs = json.loads(REFERENCE_PATH.read_text(encoding="utf-8"))
 
+    vod_width, vod_height = get_video_dimensions(VOD_PATH)
+
     # Core missed kill-based windows.
     for ref_window in refs:
         if ref_window["event_group"] not in {"triple_kill_001", "double_kill_001", "multi_kill_001", "multi_kill_002"}:
@@ -135,10 +164,8 @@ def run() -> int:
         action_center = ref_window["start_sec"] + min(6.0, (ref_window["end_sec"] - ref_window["start_sec"]) / 2.0)
         extract_frames(max(0.0, action_center - 3.0), min(6.0, ref_window["end_sec"] - ref_window["start_sec"]), ref_dir / ref_dir.name, "action_4fps", fps=4)
 
-        width = 2560
-        height = 1440
-        killfeed_crop = crop_filter(CONFIG.killfeed_roi, width, height)
-        hud_crop = crop_filter(CONFIG.hud_roi, width, height)
+        killfeed_crop = crop_filter(CONFIG.killfeed_roi, vod_width, vod_height)
+        hud_crop = crop_filter(CONFIG.hud_roi, vod_width, vod_height)
         extract_frames(ref_window["start_sec"], ref_window["end_sec"] - ref_window["start_sec"], ref_dir / ref_dir.name, "killfeed_1fps", fps=1, crop=killfeed_crop)
         extract_frames(ref_window["start_sec"], ref_window["end_sec"] - ref_window["start_sec"], ref_dir / ref_dir.name, "hud_1fps", fps=1, crop=hud_crop)
 
@@ -150,8 +177,8 @@ def run() -> int:
         extract_preview(seg["start"], seg["end"] - seg["start"], seg_dir / f"candidate_{index:02d}.mp4")
         extract_frames(seg["start"], seg["end"] - seg["start"], seg_dir / seg_dir.name, "context_1fps", fps=1)
         extract_frames(seg["start"], seg["end"] - seg["start"], seg_dir / seg_dir.name, "action_4fps", fps=4)
-        extract_frames(seg["start"], seg["end"] - seg["start"], seg_dir / seg_dir.name, "killfeed_1fps", fps=1, crop=crop_filter(CONFIG.killfeed_roi, 2560, 1440))
-        extract_frames(seg["start"], seg["end"] - seg["start"], seg_dir / seg_dir.name, "hud_1fps", fps=1, crop=crop_filter(CONFIG.hud_roi, 2560, 1440))
+        extract_frames(seg["start"], seg["end"] - seg["start"], seg_dir / seg_dir.name, "killfeed_1fps", fps=1, crop=crop_filter(CONFIG.killfeed_roi, vod_width, vod_height))
+        extract_frames(seg["start"], seg["end"] - seg["start"], seg_dir / seg_dir.name, "hud_1fps", fps=1, crop=crop_filter(CONFIG.hud_roi, vod_width, vod_height))
 
     # Top 15 extras in experiment A.
     ref_windows = refs
@@ -165,7 +192,7 @@ def run() -> int:
         extract_preview(seg["start"], seg["end"] - seg["start"], segment_dir / f"extra_{index:02d}.mp4")
         extract_frames(seg["start"], seg["end"] - seg["start"], segment_dir / segment_dir.name, "context_1fps", fps=1)
         extract_frames(seg["start"], seg["end"] - seg["start"], segment_dir / segment_dir.name, "action_4fps", fps=4)
-        extract_frames(seg["start"], seg["end"] - seg["start"], segment_dir / segment_dir.name, "killfeed_1fps", fps=1, crop=crop_filter(CONFIG.killfeed_roi, 2560, 1440))
+        extract_frames(seg["start"], seg["end"] - seg["start"], segment_dir / segment_dir.name, "killfeed_1fps", fps=1, crop=crop_filter(CONFIG.killfeed_roi, vod_width, vod_height))
 
     print(f"Generated review artifacts under {REVIEW_DIR}")
     return 0
